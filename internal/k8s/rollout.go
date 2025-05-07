@@ -46,10 +46,10 @@ func DoRolloutRestart(ctx context.Context, client ctrlclient.Client, obj ctrlcli
 		// skip updating it to trigger another restart attempt
 		patch := ctrlclient.StrategicMergeFrom(objX.DeepCopy())
 		if !dryRun {
-			if objX.Spec.Template.ObjectMeta.Annotations == nil {
-				objX.Spec.Template.ObjectMeta.Annotations = make(map[string]string)
+			if objX.Spec.Template.Annotations == nil {
+				objX.Spec.Template.Annotations = make(map[string]string)
 			}
-			objX.Spec.Template.ObjectMeta.Annotations[RolloutRestartAnnotation] = restartTimeInNanos
+			objX.Spec.Template.Annotations[RolloutRestartAnnotation] = restartTimeInNanos
 		} else {
 			log.Info("Dry Run Mode: Not Patching Resource",
 				"ns", objX.Namespace, "podController", objX.Name, "podControllerKind", objX.Kind)
@@ -65,10 +65,10 @@ func DoRolloutRestart(ctx context.Context, client ctrlclient.Client, obj ctrlcli
 		// skip updating it to trigger another restart attempt
 		patch := ctrlclient.StrategicMergeFrom(objX.DeepCopy())
 		if !dryRun {
-			if objX.Spec.Template.ObjectMeta.Annotations == nil {
-				objX.Spec.Template.ObjectMeta.Annotations = make(map[string]string)
+			if objX.Spec.Template.Annotations == nil {
+				objX.Spec.Template.Annotations = make(map[string]string)
 			}
-			objX.Spec.Template.ObjectMeta.Annotations[RolloutRestartAnnotation] = restartTimeInNanos
+			objX.Spec.Template.Annotations[RolloutRestartAnnotation] = restartTimeInNanos
 		} else {
 			log.Info("Dry Run Mode: Not Patching Resource",
 				"ns", objX.Namespace, "podController", objX.Name, "podControllerKind", objX.Kind)
@@ -84,10 +84,10 @@ func DoRolloutRestart(ctx context.Context, client ctrlclient.Client, obj ctrlcli
 		// skip updating it to trigger another restart attempt
 		patch := ctrlclient.StrategicMergeFrom(objX.DeepCopy())
 		if !dryRun {
-			if objX.Spec.Template.ObjectMeta.Annotations == nil {
-				objX.Spec.Template.ObjectMeta.Annotations = make(map[string]string)
+			if objX.Spec.Template.Annotations == nil {
+				objX.Spec.Template.Annotations = make(map[string]string)
 			}
-			objX.Spec.Template.ObjectMeta.Annotations[RolloutRestartAnnotation] = restartTimeInNanos
+			objX.Spec.Template.Annotations[RolloutRestartAnnotation] = restartTimeInNanos
 		} else {
 			log.Info("Dry Run Mode: Not Patching Resource",
 				"ns", objX.Namespace, "podController", objX.Name, "podControllerKind", objX.Kind)

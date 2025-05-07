@@ -98,7 +98,7 @@ func (r *NamespaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// get pods in the namespace
 	var pods = &corev1.PodList{}
-	err = r.Client.List(ctx, pods, &client.ListOptions{
+	err = r.List(ctx, pods, &client.ListOptions{
 		Namespace: nsName,
 	})
 	if err != nil {
@@ -169,7 +169,7 @@ func (r *NamespaceReconciler) getNamespaceDesiredRev(ctx context.Context, nsName
 	var _ = log.FromContext(ctx)
 
 	var ns = &corev1.Namespace{}
-	err := r.Client.Get(ctx, client.ObjectKey{Name: nsName}, ns, &client.GetOptions{})
+	err := r.Get(ctx, client.ObjectKey{Name: nsName}, ns, &client.GetOptions{})
 	if err != nil {
 		return "", err
 	}
@@ -179,7 +179,7 @@ func (r *NamespaceReconciler) getNamespaceDesiredRev(ctx context.Context, nsName
 
 	// get the webhooks that correspond to the label on the namespace
 	var webhooks = &admissionregistrationv1.MutatingWebhookConfigurationList{}
-	err = r.Client.List(ctx, webhooks, &client.ListOptions{
+	err = r.List(ctx, webhooks, &client.ListOptions{
 		LabelSelector: labels.Set{common.IstioTagLabel: nsIstioRevLabelValue}.AsSelector(),
 	})
 	if err != nil {
@@ -302,7 +302,7 @@ func (r *NamespaceReconciler) reconcileWebhookConfig(ctx context.Context,
 
 	// find namespaces that use this webhook's tag
 	var nsList = &corev1.NamespaceList{}
-	err := r.Client.List(ctx, nsList, &client.ListOptions{
+	err := r.List(ctx, nsList, &client.ListOptions{
 		LabelSelector: labels.Set{common.IstioRevLabel: tag}.AsSelector(),
 	})
 	if err != nil {
