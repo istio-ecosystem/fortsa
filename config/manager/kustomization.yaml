@@ -5,4 +5,4 @@ kind: Kustomization
 images:
 - name: controller
   newName: ghcr.io/hercynium/istio-fortsa
-  newTag: v0.3.0
+  newTag: v0.3.1
