@@ -1,5 +1,8 @@
 # istio-fortsa
 
+<img src="logos/istio-fortsa-logo-colour-white-background.svg"
+         alt="Istio-fortsa logo" title="Istio-fortsa" width="200" />
+
 An SRE's dream: Keep Istio's data-plane up-to-date without toil.
 
 ## Name
