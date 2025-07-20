@@ -1,9 +1,10 @@
 # istio-fortsa
 
+<!-- markdownlint-disable MD033 -->
 <img src="logos/istio-fortsa-logo-colour-white-background.svg"
          alt="Istio-fortsa logo" title="Istio-fortsa" width="200" />
 
-An SRE's dream: Keep Istio's data-plane up-to-date without toil.
+Keep Istio's data-plane up-to-date automatically.
 
 ## Name
 
@@ -28,12 +29,13 @@ Istio's default envoy-based proxy.
 
 This project was inspired by my experience with the toil of keeping the istio data-plane
 up-to-date and then discovering the solution Google had come up with, described in this
-YouTube video: https://youtu.be/R86ZsYH7Ka4
+YouTube video: <https://youtu.be/R86ZsYH7Ka4>
 
 ## Getting Started
 
 ### Prerequisites
-- go version v1.21.0+
+
+- go version v1.24.0+
 - docker version 17.03+.
 - kubectl version v1.11.3+.
 - Access to a Kubernetes v1.11.3+ cluster running Istio (lowest version not yet determined)
@@ -43,12 +45,48 @@ YouTube video: https://youtu.be/R86ZsYH7Ka4
 This project is packaged for deployment using Helm or OLM. See the "Packages" for the
 various docker images available. The helm repo is here:
 
-```
+```text
 https://hercynium.github.io/istio-fortsa/
 ```
 
 Installation should be like any other app packeged for Helm or OLM depending on the
 method you want to use.
+
+## Architecture
+
+Fortsa is a relatively simple Kubernetes Operator with limited ability to interact with
+the cluster. Primarily, it does the following:
+
+- Watches the configuration of Istio’s MutationWebhookConfiguration objects as well as the
+configuration of certain Istio-related namespace labels and annotations.
+- Compares the Istio configuration with the configuration of pods running in Istio-enabled namespaces
+- Updates the objects controlling the pods to cause them to gracefully restart.
+
+<!-- markdownlint-disable MD033 -->
+<img src="fortsa-architecture.jpg"
+         alt="Fortsa Architecture" title="Architecture" width="400" />
+
+When a workload pod is restarted in this way, it automatically gets re-configured with an updated
+proxy sidecar container. This works because Istio-enabled pods are mutated by Istio’s own
+MutatingWebhooks in order to inject a sidecar proxy container whose version matches that of the
+control-plane configuration. These webhooks are not a part of Fortsa, they are part of Istio.
+
+When deployed via its Helm chart, Fortsa is configured with RBAC permissions to only perform the
+actions necessary for its operation, on only the objects it needs to act upon.
+
+The only changes Fortsa makes within a running Kubernetes cluster are to update pods’ controllers
+(typically Deployments, DaemonSets, or ReplicaSets) with a well-known annotation. Adding or
+updating this annotation is what causes the controller to initiate a controlled restart of the
+pods. This is in fact the same exact mechanism used by the command-line tool `kubectl` when issuing
+a `rollout restart`.
+
+Fortsa currently has no CRDs and there are no plans to introduce any.
+
+Fortsa is written in Go, and compiles to a single binary that is deployed via a bare container with
+only the binary (FROM scratch, in Docker parlance)
+
+Fortsa does not require access to anything outside the cluster, not access to any applications other
+than the k8s API. It does not listen on any ports except for liveness/readiness checks and metrics.
 
 ## Project Distribution
 
@@ -64,6 +102,12 @@ build, test, distribution, and deployment details.
 ## TODO
 
 There's lots to do! If you want to help, see the Contributing section, below.
+
+## Origin
+
+Fortsa originated within [Cloudera](https://cloudera.com) in late 2024 as an SRE's
+hackathon project. Realizing the potential benefit to the Istio Community, it was
+subsequently open-sourced.
 
 ## Contributing
 
@@ -82,6 +126,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
+<!-- markdownlint-disable MD046 -->
     http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
