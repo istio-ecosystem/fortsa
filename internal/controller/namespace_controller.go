@@ -41,9 +41,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
-	"github.com/hercynium/istio-fortsa/internal/common"
-	"github.com/hercynium/istio-fortsa/internal/config"
-	"github.com/hercynium/istio-fortsa/internal/k8s"
+	"github.com/istio-ecosystem/fortsa/internal/common"
+	"github.com/istio-ecosystem/fortsa/internal/config"
+	"github.com/istio-ecosystem/fortsa/internal/k8s"
 )
 
 // NamespaceReconciler reconciles a Namespace object

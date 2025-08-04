@@ -3,8 +3,8 @@ controllerManager:
   replicas: 1
   container:
     image:
-      repository: ghcr.io/hercynium/istio-fortsa
-      tag: v0.3.3
+      repository: ghcr.io/istio-ecosystem/fortsa
+      tag: v0.3.3-9-g4c1b3a9
     args:
       - "--leader-elect"
       - "--metrics-bind-address=:8443"
@@ -38,11 +38,7 @@ controllerManager:
     seccompProfile:
       type: RuntimeDefault
   terminationGracePeriodSeconds: 10
-  serviceAccountName: istio-fortsa-controller-manager
-  livenessProbe:
-    initialDelaySeconds: 30
-  readinessProbe:
-    initialDelaySeconds: 30
+  serviceAccountName: fortsa-controller-manager
 # [RBAC]: To enable RBAC (Permissions) configurations
 rbac:
   enable: true

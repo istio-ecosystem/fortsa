@@ -35,14 +35,14 @@ BUNDLE_DEFAULT_CHANNEL := --default-channel=$(DEFAULT_CHANNEL)
 endif
 BUNDLE_METADATA_OPTS ?= $(BUNDLE_CHANNELS) $(BUNDLE_DEFAULT_CHANNEL)
 
-DOCKER_REPO_BASE ?= ghcr.io/hercynium
+DOCKER_REPO_BASE ?= ghcr.io/istio-ecosystem
 
 # IMAGE_TAG_BASE defines the docker.io namespace and part of the image name for remote images.
 # This variable is used to construct full image tags for bundle and catalog images.
 #
 # For example, running 'make bundle-build bundle-push catalog-build catalog-push' will build and push both
-# ghcr.io/hercynium/istio-fortsa-bundle:$VERSION and ghcr.io/hercynium/istio-fortsa-catalog:$VERSION.
-IMAGE_TAG_BASE ?= $(DOCKER_REPO_BASE)/istio-fortsa
+# ghcr.io/istio-ecosystem/fortsa-bundle:$VERSION and ghcr.io/istio-ecosystem/fortsa-catalog:$VERSION.
+IMAGE_TAG_BASE ?= $(DOCKER_REPO_BASE)/fortsa
 
 # BUNDLE_IMG defines the image:tag used for the bundle.
 # You can use it as an arg. (E.g make bundle-build BUNDLE_IMG=<some-registry>/<project-name-bundle>:<tag>)
@@ -198,7 +198,7 @@ bundle-build: ## Build the bundle image.
 	docker build -f bundle.Dockerfile -t $(BUNDLE_IMG) .
 
 helmify-generate: helmify config-update ## Generate a generic helm chart for the operator (DEPRECATED)
-	$(KUSTOMIZE) build config/default | $(HELMIFY) chart/istio-fortsa
+	$(KUSTOMIZE) build config/default | $(HELMIFY) chart/fortsa
 
 .PHONY: helm-generate
 helm-generate: kubebuilder config-update ## Generate a helm chart using kubebuilder into dist/chart
@@ -214,17 +214,17 @@ helm-fixup: yq helm-generate ## Customize the generated helm chart from kubebuil
 	$(YQ) -i eval ".controllerManager.container.readinessProbe.initialDelaySeconds = 30" dist/chart/values.yaml
 
 .PHONY: helm-clobber
-helm-clobber: helm-fixup ## Copy the chart from dist/chart into chart/istio-fortsa
+helm-clobber: helm-fixup ## Copy the chart from dist/chart into chart/fortsa
 	mkdir -p chart
-	rm -rf chart/istio-fortsa
-	cp -a dist/chart chart/istio-fortsa
+	rm -rf chart/fortsa
+	cp -a dist/chart chart/fortsa
 
 .PHONY: helm-update
-helm-update: yq  ## Update the helm chart from chart/istio-fortsa
-	$(YQ) -i eval ".version = \"$(IMG_TAG)\"" chart/istio-fortsa/Chart.yaml
-	$(YQ) -i eval ".appVersion = \"$(IMG_TAG)\"" chart/istio-fortsa/Chart.yaml
-	$(YQ) -i eval ".controllerManager.container.image.repository = \"$(IMAGE_TAG_BASE)\"" chart/istio-fortsa/values.yaml
-	$(YQ) -i eval ".controllerManager.container.image.tag = \"$(IMG_TAG)\"" chart/istio-fortsa/values.yaml
+helm-update: yq  ## Update the helm chart from chart/fortsa
+	$(YQ) -i eval ".version = \"$(IMG_TAG)\"" chart/fortsa/Chart.yaml
+	$(YQ) -i eval ".appVersion = \"$(IMG_TAG)\"" chart/fortsa/Chart.yaml
+	$(YQ) -i eval ".controllerManager.container.image.repository = \"$(IMAGE_TAG_BASE)\"" chart/fortsa/values.yaml
+	$(YQ) -i eval ".controllerManager.container.image.tag = \"$(IMG_TAG)\"" chart/fortsa/values.yaml
 
 ##@ Deployment
 
@@ -393,14 +393,14 @@ catalog-push: ## Push a catalog image.
 	$(MAKE) docker-push IMG=$(CATALOG_IMG)
 
 .PHONY: helm-package
-helm-package: helm-update  ## Package the helm chart from chart/istio-fortsa into a tarball
-	helm package chart/istio-fortsa
+helm-package: helm-update  ## Package the helm chart from chart/fortsa into a tarball
+	helm package chart/fortsa
 
-./istio-fortsa-$(IMG_TAG).tgz: helm-package
+./fortsa-$(IMG_TAG).tgz: helm-package
 
 .PHONY: helm-push
-helm-push: ./istio-fortsa-$(IMG_TAG).tgz  ## Push the helm chart to an OCI registry
-	helm push ./istio-fortsa-$(IMG_TAG).tgz oci://$(DOCKER_REPO_BASE)/helm
+helm-push: ./fortsa-$(IMG_TAG).tgz  ## Push the helm chart to an OCI registry
+	helm push ./fortsa-$(IMG_TAG).tgz oci://$(DOCKER_REPO_BASE)/helm
 
 .PHONY: release
 release: config-update helm-update ## Prepare for a release

@@ -27,12 +27,12 @@ builds:
 
 release:
   github:
-    owner: hercynium
-    name: istio-fortsa
+    owner: istio-ecosystem
+    name: fortsa
 
 kos:
   - base_image: gcr.io/distroless/static:nonroot
-    repository: ghcr.io/hercynium/istio-fortsa
+    repository: ghcr.io/istio-ecosystem/fortsa
     main: ./cmd
     tags:
       - "{{ .Tag }}"

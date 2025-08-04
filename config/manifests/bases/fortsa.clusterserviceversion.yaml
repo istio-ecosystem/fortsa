@@ -9,7 +9,7 @@ metadata:
 spec:
   apiservicedefinitions: {}
   customresourcedefinitions: {}
-  description: Update istio proxies automatically
+  description: Keep Istio's data-plane up-to-date automatically
   displayName: fortsa
   icon:
   - base64data: ""
@@ -29,11 +29,13 @@ spec:
     type: AllNamespaces
   keywords:
   - istio
+  - data-plane
+  - fortsa
   links:
   - name: Fortsa
     url: https://fortsa.domain
   maturity: alpha
-  minKubeVersion: 1.24.0
   provider:
-    name: fortsa
+    name: istio-ecosystem
+    url: https://github.com/istio-ecosystem
   version: 0.0.0

@@ -5,10 +5,10 @@
   {{- else if .Values.nameOverride }}
     {{ .Values.nameOverride | trunc 63 | trimSuffix "-" }}
   {{- else }}
-    istio-fortsa
+    fortsa
   {{- end }}
 {{- else }}
-  istio-fortsa
+  fortsa
 {{- end }}
 {{- end }}
 

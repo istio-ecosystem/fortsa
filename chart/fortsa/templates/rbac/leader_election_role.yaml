@@ -6,7 +6,7 @@ metadata:
   labels:
     {{- include "chart.labels" . | nindent 4 }}
   namespace: {{ .Release.Namespace }}
-  name: istio-fortsa-leader-election-role
+  name: fortsa-leader-election-role
 rules:
 - apiGroups:
   - ""

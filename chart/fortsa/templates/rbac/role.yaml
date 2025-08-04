@@ -5,7 +5,7 @@ kind: ClusterRole
 metadata:
   labels:
     {{- include "chart.labels" . | nindent 4 }}
-  name: istio-fortsa-manager-role
+  name: fortsa-manager-role
 rules:
 - apiGroups:
   - ""
