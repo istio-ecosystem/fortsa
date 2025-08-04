@@ -82,8 +82,8 @@ function install-istio() {
 }
 
 function install-fortsa() {
-  createXnamespace istio-fortsa
-  helmXinstall istio-fortsa istio-fortsa istio-fortsa/istio-fortsa \
+  createXnamespace fortsa
+  helmXinstall fortsa fortsa fortsa/fortsa \
     --wait \
     --version "v0.0.19"
 }

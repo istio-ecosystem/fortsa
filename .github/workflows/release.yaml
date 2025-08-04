@@ -54,15 +54,15 @@ jobs:
       #     KO_DOCKER_REPO: ghcr.io/${{ github.repository }}
       # this takes the same amount of time as using goreleaser, but doesn't create release tarballs
       - name: Build and Push Docker Images
-        run: make docker-buildx IMAGE_TAG_BASE=ghcr.io/${{ github.actor }}/istio-fortsa GIT_TAG=${{ github.event.release.tag_name }}
+        run: make docker-buildx IMAGE_TAG_BASE=ghcr.io/${{ github.actor }}/fortsa GIT_TAG=${{ github.event.release.tag_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and Push OLM Bundle Image
-        run: make bundle bundle-build bundle-push IMAGE_TAG_BASE=ghcr.io/${{ github.actor }}/istio-fortsa GIT_TAG=${{ github.event.release.tag_name }}
+        run: make bundle bundle-build bundle-push IMAGE_TAG_BASE=ghcr.io/${{ github.actor }}/fortsa GIT_TAG=${{ github.event.release.tag_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and Push OLM Catalog Image
-        run: make catalog-build catalog-push IMAGE_TAG_BASE=ghcr.io/${{ github.actor }}/istio-fortsa GIT_TAG=${{ github.event.release.tag_name }}
+        run: make catalog-build catalog-push IMAGE_TAG_BASE=ghcr.io/${{ github.actor }}/fortsa GIT_TAG=${{ github.event.release.tag_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -73,13 +73,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Rename Helm Chart Tarball File for Upload
-        run: mv istio-fortsa-${{ github.event.release.tag_name }}.tgz istio-fortsa-helm-chart-${{ github.event.release.tag_name }}.tgz
+        run: mv fortsa-${{ github.event.release.tag_name }}.tgz fortsa-helm-chart-${{ github.event.release.tag_name }}.tgz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Upload Helm Chart Tarball to Release
         uses: AButler/upload-release-assets@v3.0
         with:
-          files: "istio-fortsa-helm-chart-${{ github.event.release.tag_name }}.tgz"
+          files: "fortsa-helm-chart-${{ github.event.release.tag_name }}.tgz"
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Run gh-pages chart-releaser
         # uses: helm/chart-releaser-action@v1.7.0 # 1.7.0 is broken with error "latest_tag: unbound variable" (issue #171)

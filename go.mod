@@ -1,4 +1,4 @@
-module github.com/hercynium/istio-fortsa
+module github.com/istio-ecosystem/fortsa
 
 go 1.24.0
 

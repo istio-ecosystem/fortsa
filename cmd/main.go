@@ -38,8 +38,8 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	"github.com/hercynium/istio-fortsa/internal/config"
-	"github.com/hercynium/istio-fortsa/internal/controller"
+	"github.com/istio-ecosystem/fortsa/internal/config"
+	"github.com/istio-ecosystem/fortsa/internal/controller"
 	//+kubebuilder:scaffold:imports
 )
 

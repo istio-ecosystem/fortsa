@@ -24,10 +24,10 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/hercynium/istio-fortsa/test/utils"
+	"github.com/istio-ecosystem/fortsa/test/utils"
 )
 
-const namespace = "istio-fortsa-system"
+const namespace = "fortsa-system"
 
 var _ = Describe("controller", Ordered, func() {
 	BeforeAll(func() {
@@ -60,7 +60,7 @@ var _ = Describe("controller", Ordered, func() {
 			var err error
 
 			// projectimage stores the name of the image used in the example
-			var projectimage = "sscaffidi/istio-fortsa:v0.0.1"
+			var projectimage = "istio-ecosystem/fortsa:v0.0.1"
 
 			By("building the manager(Operator) image")
 			cmd := exec.Command("make", "docker-build", fmt.Sprintf("IMG=%s", projectimage))
