@@ -54,22 +54,22 @@ jobs:
       #     KO_DOCKER_REPO: ghcr.io/${{ github.repository }}
       # this takes the same amount of time as using goreleaser, but doesn't create release tarballs
       - name: Build and Push Docker Images
-        run: make docker-buildx IMAGE_TAG_BASE=ghcr.io/${{ github.actor }}/fortsa GIT_TAG=${{ github.event.release.tag_name }}
+        run: make docker-buildx IMAGE_TAG_BASE=ghcr.io/${{ github.repository_owner }}/fortsa GIT_TAG=${{ github.event.release.tag_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and Push OLM Bundle Image
-        run: make bundle bundle-build bundle-push IMAGE_TAG_BASE=ghcr.io/${{ github.actor }}/fortsa GIT_TAG=${{ github.event.release.tag_name }}
+        run: make bundle bundle-build bundle-push IMAGE_TAG_BASE=ghcr.io/${{ github.repository_owner }}/fortsa GIT_TAG=${{ github.event.release.tag_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and Push OLM Catalog Image
-        run: make catalog-build catalog-push IMAGE_TAG_BASE=ghcr.io/${{ github.actor }}/fortsa GIT_TAG=${{ github.event.release.tag_name }}
+        run: make catalog-build catalog-push IMAGE_TAG_BASE=ghcr.io/${{ github.repository_owner }}/fortsa GIT_TAG=${{ github.event.release.tag_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       ### generate and upload helm chart artifacts
 
       - name: Build and Push OCI Helm Chart
-        run: make helm-push DOCKER_REPO_BASE=ghcr.io/${{ github.actor }} GIT_TAG=${{ github.event.release.tag_name }}
+        run: make helm-push DOCKER_REPO_BASE=ghcr.io/${{ github.repository_owner }} GIT_TAG=${{ github.event.release.tag_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Rename Helm Chart Tarball File for Upload
