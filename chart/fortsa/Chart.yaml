@@ -2,6 +2,6 @@ apiVersion: v2
 name: fortsa
 description: A Helm chart to distribute the project fortsa
 type: application
-version: v0.3.3-9-g4c1b3a9
-appVersion: "v0.3.3-9-g4c1b3a9"
+version: v0.4.0
+appVersion: "v0.4.0"
 icon: "https://example.com/icon.png"
