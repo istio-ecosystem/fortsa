@@ -1,7 +1,7 @@
-# istio-fortsa
+# Fortsa
 
 <!-- markdownlint-disable MD033 -->
-<img src="logos/istio-fortsa-logo-colour-white-background.svg"
+<img src="logos/fortsa-logo-colour-white-background.svg"
          alt="Istio-fortsa logo" title="Istio-fortsa" width="200" />
 
 Keep Istio's data-plane up-to-date automatically.
@@ -46,7 +46,7 @@ This project is packaged for deployment using Helm or OLM. See the "Packages" fo
 various docker images available. The helm repo is here:
 
 ```text
-https://hercynium.github.io/istio-fortsa/
+https://istio-ecosystem.github.io/fortsa/
 ```
 
 Installation should be like any other app packeged for Helm or OLM depending on the
@@ -59,7 +59,8 @@ the cluster. Primarily, it does the following:
 
 - Watches the configuration of Istio’s MutationWebhookConfiguration objects as well as the
 configuration of certain Istio-related namespace labels and annotations.
-- Compares the Istio configuration with the configuration of pods running in Istio-enabled namespaces
+- Compares the Istio configuration with the configuration of pods running in Istio-enabled
+namespaces
 - Updates the objects controlling the pods to cause them to gracefully restart.
 
 <!-- markdownlint-disable MD033 -->

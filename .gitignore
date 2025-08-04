@@ -37,4 +37,4 @@ bundle/
 bundle_tmp*/
 
 # generated files for helm
-istio-fortsa*.tgz
+fortsa*.tgz

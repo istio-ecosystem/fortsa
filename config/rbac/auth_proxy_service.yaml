@@ -3,7 +3,7 @@ kind: Service
 metadata:
   labels:
     control-plane: controller-manager
-    app.kubernetes.io/name: istio-fortsa
+    app.kubernetes.io/name: fortsa
     app.kubernetes.io/managed-by: kustomize
   name: cm-metrics-svc
   namespace: system

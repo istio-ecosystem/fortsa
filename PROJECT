@@ -9,8 +9,8 @@ plugins:
   helm.kubebuilder.io/v1-alpha: {}
   manifests.sdk.operatorframework.io/v2: {}
   scorecard.sdk.operatorframework.io/v2: {}
-projectName: istio-fortsa
-repo: github.com/hercynium/istio-fortsa
+projectName: fortsa
+repo: github.com/istio-ecosystem/fortsa
 resources:
 - controller: true
   group: core
