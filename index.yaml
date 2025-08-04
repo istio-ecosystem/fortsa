@@ -1,5 +1,17 @@
 apiVersion: v1
 entries:
+  fortsa:
+  - apiVersion: v2
+    appVersion: v0.4.1
+    created: "2025-08-04T02:56:09.810160604Z"
+    description: A Helm chart to distribute the project fortsa
+    digest: 3921f332806f1af591c64062c1064d9e3ccc70c75a49b24b5fe2e0738be4f408
+    icon: https://example.com/icon.png
+    name: fortsa
+    type: application
+    urls:
+    - https://github.com/istio-ecosystem/fortsa/releases/download/v0.4.1/fortsa-helm-chart-v0.4.1.tgz
+    version: v0.4.1
   istio-fortsa:
   - apiVersion: v2
     appVersion: v0.3.3
@@ -214,4 +226,4 @@ entries:
     urls:
     - https://github.com/hercynium/istio-fortsa/releases/download/v0.0.18/istio-fortsa-helm-chart-v0.0.18.tgz
     version: v0.0.18
-generated: "2025-07-15T14:04:26.538871493Z"
+generated: "2025-08-04T02:56:09.81022215Z"
