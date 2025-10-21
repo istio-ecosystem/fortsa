@@ -83,7 +83,7 @@ func main() {
 
 	if version {
 		fmt.Printf("%s (%s %s)\n", Version, Commit, CommitDate)
-		os.Exit(1)
+		os.Exit(0)
 	}
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
