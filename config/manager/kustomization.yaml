@@ -5,4 +5,4 @@ kind: Kustomization
 images:
 - name: controller
   newName: ghcr.io/istio-ecosystem/fortsa
-  newTag: v0.5.1-33-g5e7dfc1
+  newTag: v0.5.1-34-gcf092cc

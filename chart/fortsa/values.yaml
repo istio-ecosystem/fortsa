@@ -1,69 +1,96 @@
-# [MANAGER]: Manager Deployment Configurations
-controllerManager:
+## String to partially override chart.fullname template (will maintain the release name)
+##
+# nameOverride: ""
+
+## String to fully override chart.fullname template
+##
+# fullnameOverride: ""
+
+## Configure the controller manager deployment
+##
+manager:
   replicas: 1
+  image:
+    repository: gcr.io/kubebuilder/kube-rbac-proxy
+    tag: v0.16.0
+    pullPolicy: IfNotPresent
+  ## Arguments
+  ##
+  args:
+    - --secure-listen-address=0.0.0.0:8443
+    - --upstream=http://127.0.0.1:8080/
+    - --logtostderr=true
+    - --v=0
+  ## Environment variables
+  ##
+  env: []
+  ## Image pull secrets
+  ##
+  imagePullSecrets: []
+  ## Pod-level security settings
+  ##
+  podSecurityContext:
+    runAsNonRoot: true
+  ## Container-level security settings
+  ##
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+  ## Resource limits and requests
+  ##
+  resources:
+    limits:
+      cpu: 500m
+      memory: 128Mi
+    requests:
+      cpu: 5m
+      memory: 64Mi
+  ## Manager pod's affinity
+  ##
+  affinity: {}
+  ## Manager pod's node selector
+  ##
+  nodeSelector: {}
+  ## Manager pod's tolerations
+  ##
+  tolerations: []
+## Helper RBAC roles for managing custom resources
+##
+rbacHelpers:
+  # Install convenience admin/editor/viewer roles for CRDs
+  enable: false
+## Custom Resource Definitions
+##
+crd:
+  # Install CRDs with the chart
+  enable: true
+  # Keep CRDs when uninstalling
+  keep: true
+## Controller metrics endpoint.
+## Enable to expose /metrics endpoint with RBAC protection.
+##
+metrics:
+  enable: true
+  # Metrics server port
+  port: 8443
+## Cert-manager integration for TLS certificates.
+## Required for webhook certificates and metrics endpoint certificates.
+##
+certManager:
+  enable: false
+## Prometheus ServiceMonitor for metrics scraping.
+## Requires prometheus-operator to be installed in the cluster.
+##
+prometheus:
+  enable: false
+controllerManager:
   container:
     image:
       repository: ghcr.io/istio-ecosystem/fortsa
-      tag: v0.5.1-33-g5e7dfc1
-    args:
-      - "--leader-elect"
-      - "--metrics-bind-address=:8443"
-      - "--health-probe-bind-address=:8081"
-    resources:
-      limits:
-        cpu: 500m
-        memory: 128Mi
-      requests:
-        cpu: 10m
-        memory: 64Mi
+      tag: v0.5.1-34-gcf092cc
     livenessProbe:
       initialDelaySeconds: 30
-      periodSeconds: 20
-      httpGet:
-        path: /healthz
-        port: 8081
     readinessProbe:
       initialDelaySeconds: 30
-      periodSeconds: 10
-      httpGet:
-        path: /readyz
-        port: 8081
-    securityContext:
-      allowPrivilegeEscalation: false
-      capabilities:
-        drop:
-          - "ALL"
-  securityContext:
-    runAsNonRoot: true
-    seccompProfile:
-      type: RuntimeDefault
-  terminationGracePeriodSeconds: 10
-  serviceAccountName: fortsa-controller-manager
-# [RBAC]: To enable RBAC (Permissions) configurations
-rbac:
-  enable: true
-# [CRDs]: To enable the CRDs
-crd:
-  # This option determines whether the CRDs are included
-  # in the installation process.
-  enable: true
-  # Enabling this option adds the "helm.sh/resource-policy": keep
-  # annotation to the CRD, ensuring it remains installed even when
-  # the Helm release is uninstalled.
-  # NOTE: Removing the CRDs will also remove all cert-manager CR(s)
-  # (Certificates, Issuers, ...) due to garbage collection.
-  keep: true
-# [METRICS]: Set to true to generate manifests for exporting metrics.
-# To disable metrics export set false, and ensure that the
-# ControllerManager argument "--metrics-bind-address=:8443" is removed.
-metrics:
-  enable: true
-# [PROMETHEUS]: To enable a ServiceMonitor to export metrics to Prometheus set true
-prometheus:
-  enable: false
-# [CERT-MANAGER]: To enable cert-manager injection to webhooks set true
-certmanager:
-  enable: false
-# [NETWORK POLICIES]: To enable NetworkPolicies set true
-networkPolicy:
-  enable: false

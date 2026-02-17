@@ -1,7 +1,11 @@
 apiVersion: v2
 name: fortsa
-description: A Helm chart to distribute the project fortsa
+description: A Helm chart to distribute fortsa
 type: application
-version: v0.5.1-33-g5e7dfc1
-appVersion: "v0.5.1-33-g5e7dfc1"
-icon: "https://example.com/icon.png"
+version: v0.5.1-34-gcf092cc
+appVersion: "v0.5.1-34-gcf092cc"
+keywords:
+  - kubernetes
+  - operator
+annotations:
+  kubebuilder.io/generated-by: kubebuilder
