@@ -1,0 +1,21 @@
+{{- if .Values.metrics.enable }}
+apiVersion: v1
+kind: Service
+metadata:
+    labels:
+        app.kubernetes.io/managed-by: {{ .Release.Service }}
+        app.kubernetes.io/name: {{ include "fortsa.name" . }}
+        helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        control-plane: controller-manager
+    name: {{ include "fortsa.resourceName" (dict "suffix" "cm-metrics-svc" "context" $) }}
+    namespace: {{ .Release.Namespace }}
+spec:
+    ports:
+        - name: https
+          port: {{ .Values.metrics.port }}
+          protocol: TCP
+          targetPort: https
+    selector:
+        control-plane: controller-manager
+{{- end }}

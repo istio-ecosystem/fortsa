@@ -1,0 +1,16 @@
+{{- if .Values.metrics.enable }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+    labels:
+        app.kubernetes.io/managed-by: {{ .Release.Service }}
+        app.kubernetes.io/name: {{ include "fortsa.name" . }}
+        helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    name: {{ include "fortsa.resourceName" (dict "suffix" "metrics-reader" "context" $) }}
+rules:
+    - nonResourceURLs:
+        - /metrics
+      verbs:
+        - get
+{{- end }}

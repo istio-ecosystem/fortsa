@@ -14,8 +14,8 @@
 
 
 {{- define "chart.labels" -}}
-{{- if or .Values.appVersion .Chart.AppVersion -}}
-app.kubernetes.io/version: {{ .Values.appVersion | default .Chart.AppVersion | quote }}
+{{- if .Chart.AppVersion -}}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
 {{- if .Chart.Version }}
 helm.sh/chart: {{ .Chart.Version | quote }}
