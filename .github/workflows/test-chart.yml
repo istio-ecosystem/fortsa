@@ -37,7 +37,8 @@ jobs:
 
       - name: Install Helm
         run: make install-helm
-
+      - name: Generate Helm Chart
+        run: make helm-generate
       - name: Lint Helm Chart
         run: |
           helm lint ./dist/chart
