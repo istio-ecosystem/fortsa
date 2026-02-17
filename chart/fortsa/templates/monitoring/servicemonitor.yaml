@@ -1,11 +1,14 @@
-# To integrate with Prometheus.
 {{- if .Values.prometheus.enable }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   labels:
-    {{- include "chart.labels" . | nindent 4 }}
-  name: fortsa-controller-manager-metrics-monitor
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/name: {{ include "fortsa.name" . }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    control-plane: controller-manager
+  name: {{ include "fortsa.resourceName" (dict "suffix" "controller-manager-metrics-monitor" "context" $) }}
   namespace: {{ .Release.Namespace }}
 spec:
   endpoints:
@@ -14,8 +17,8 @@ spec:
       scheme: https
       bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
       tlsConfig:
-        {{- if .Values.certmanager.enable }}
-        serverName: fortsa-controller-manager-metrics-service.{{ .Release.Namespace }}.svc
+        {{- if .Values.certManager.enable }}
+        serverName: {{ include "fortsa.resourceName" (dict "suffix" "controller-manager-metrics-service" "context" $) }}.{{ .Release.Namespace }}.svc
         # Apply secure TLS configuration with cert-manager
         insecureSkipVerify: false
         ca:
@@ -35,5 +38,6 @@ spec:
         {{- end }}
   selector:
     matchLabels:
+      app.kubernetes.io/name: {{ include "fortsa.name" . }}
       control-plane: controller-manager
 {{- end }}

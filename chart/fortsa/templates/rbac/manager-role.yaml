@@ -1,0 +1,53 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+    name: {{ include "fortsa.resourceName" (dict "suffix" "manager-role" "context" $) }}
+rules:
+    - apiGroups:
+        - ""
+      resources:
+        - namespaces
+        - namespaces/finalizers
+        - namespaces/status
+        - pods
+        - pods/finalizers
+        - pods/status
+      verbs:
+        - get
+        - list
+        - watch
+    - apiGroups:
+        - '*'
+      resources:
+        - '*'
+      verbs:
+        - get
+        - list
+        - watch
+    - apiGroups:
+        - admissionregistration.k8s.io
+      resources:
+        - mutatingwebhookconfigurations
+        - mutatingwebhookconfigurations/finalizers
+        - mutatingwebhookconfigurations/status
+      verbs:
+        - get
+        - list
+        - watch
+    - apiGroups:
+        - apps
+      resources:
+        - daemonset
+        - daemonsets
+        - deployment
+        - deployments
+        - replicaset
+        - replicasets
+        - statefulset
+        - statefulsets
+      verbs:
+        - get
+        - list
+        - patch
+        - update
+        - watch
