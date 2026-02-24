@@ -2,19 +2,18 @@ name: E2E Tests
 
 on:
   push:
+  pull_request:
 
 jobs:
   test-e2e:
-    name: Run e2e tests
+    name: Run on Ubuntu
     runs-on: ubuntu-latest
-    # don't run when only tags have been pushed
-    if: github.ref_type != 'tag'
     steps:
       - name: Clone the code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
 
@@ -26,12 +25,7 @@ jobs:
 
       - name: Verify kind installation
         run: kind version
-      
-      # we want to pre-create the manager image to avoid the opaque build step in the tests 
-      - name: Run docker build to pre-create the manager image
-        run: |
-          make docker-build
-          
+
       - name: Running Test e2e
         run: |
           go mod tidy

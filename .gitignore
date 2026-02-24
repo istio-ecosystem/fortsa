@@ -25,6 +25,3 @@ go.work
 *.swp
 *.swo
 *~
-
-# Misc
-tmp
