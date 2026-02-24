@@ -27,7 +27,8 @@ import (
 )
 
 var (
-	scheme = runtime.NewScheme()
+	scheme   = runtime.NewScheme()
+	setupLog = ctrl.Log.WithName("setup")
 )
 
 // parseSkipNamespaces splits a comma-separated string into non-empty trimmed namespace names.
@@ -79,10 +80,10 @@ func main() {
 		Scheme:           scheme,
 		Metrics:          metricsserver.Options{BindAddress: metricsAddr},
 		LeaderElection:   enableLeaderElection,
-		LeaderElectionID: "fortsa2.scaffidi.net",
+		LeaderElectionID: "fortsa.scaffidi.net",
 	})
 	if err != nil {
-		ctrl.Log.WithName("setup").Error(err, "unable to start manager")
+		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
 	}
 
@@ -111,17 +112,17 @@ func main() {
 	}
 	err = builder.Complete(reconciler)
 	if err != nil {
-		ctrl.Log.WithName("setup").Error(err, "unable to create controller")
+		setupLog.Error(err, "unable to create controller")
 		os.Exit(1)
 	}
 
 	if dryRun {
-		ctrl.Log.WithName("setup").Info("starting manager in dry-run mode (no workloads will be annotated)")
+		setupLog.Info("starting manager in dry-run mode (no workloads will be annotated)")
 	} else {
-		ctrl.Log.WithName("setup").Info("starting manager")
+		setupLog.Info("starting manager")
 	}
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
-		ctrl.Log.WithName("setup").Error(err, "problem running manager")
+		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
 }
