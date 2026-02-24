@@ -1,3 +1,0 @@
----
-package-path: .
-release-name-template: "{{ .Version }}"
