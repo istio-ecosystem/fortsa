@@ -7,6 +7,10 @@ import (
 	"strings"
 	"time"
 
+	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
+	// to ensure that exec-entrypoint and run can make use of them.
+	_ "k8s.io/client-go/plugin/pkg/client/auth"
+
 	"github.com/spf13/pflag"
 	admissionregv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -21,6 +25,8 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	// +kubebuilder:scaffold:imports
 
 	"github.com/istio-ecosystem/fortsa/internal/controller"
 	"github.com/istio-ecosystem/fortsa/internal/webhook"
@@ -49,8 +55,11 @@ func parseSkipNamespaces(s string) []string {
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(corev1.AddToScheme(scheme))
+
+	// +kubebuilder:scaffold:scheme
 }
 
+// nolint:gocyclo
 func main() {
 	var metricsAddr string
 	var enableLeaderElection bool
@@ -69,7 +78,9 @@ func main() {
 	pflag.DurationVar(&reconcilePeriod, "reconcile-period", 1*time.Hour, "Period between full reconciliations of all istio-sidecar-injector ConfigMaps. Use 0 to disable periodic reconciliation.")
 	pflag.StringVar(&skipNamespaces, "skip-namespaces", "kube-system,istio-system", "Comma-separated list of namespaces to skip when scanning pods for outdated sidecars.")
 
-	zapOpts := zap.Options{}
+	zapOpts := zap.Options{
+		Development: true,
+	}
 	zapOpts.BindFlags(flag.CommandLine)
 	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
 	pflag.Parse()
@@ -80,7 +91,18 @@ func main() {
 		Scheme:           scheme,
 		Metrics:          metricsserver.Options{BindAddress: metricsAddr},
 		LeaderElection:   enableLeaderElection,
-		LeaderElectionID: "fortsa.scaffidi.net",
+		LeaderElectionID: "71f32f9d.fortsa.scaffidi.net",
+		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
+		// when the Manager ends. This requires the binary to immediately end when the
+		// Manager is stopped, otherwise, this setting is unsafe. Setting this significantly
+		// speeds up voluntary leader transitions as the new leader don't have to wait
+		// LeaseDuration time first.
+		//
+		// In the default scaffold provided, the program ends immediately after
+		// the manager stops, so would be fine to enable this option. However,
+		// if you are doing or is intended to do any operation such as perform cleanups
+		// after the manager stops then its usage might be unsafe.
+		// LeaderElectionReleaseOnCancel: true,
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
