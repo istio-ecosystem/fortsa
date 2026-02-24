@@ -23,7 +23,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"time"
 
 	. "github.com/onsi/ginkgo/v2" // nolint:revive,staticcheck
 )
@@ -166,33 +165,14 @@ func IsCertManagerCRDsInstalled() bool {
 	return false
 }
 
-// LoadImageToKindClusterWithName loads a local docker image to the kind cluster.
-// The cluster name is taken from KIND_CLUSTER env, defaulting to "kind".
+// LoadImageToKindClusterWithName loads a local docker image to the kind cluster
 func LoadImageToKindClusterWithName(name string) error {
 	cluster := "kind"
 	if v, ok := os.LookupEnv("KIND_CLUSTER"); ok {
 		cluster = v
 	}
-	return LoadImageToKindCluster(name, cluster)
-}
-
-// LoadImageToKindCluster loads a local docker image into the specified kind cluster.
-func LoadImageToKindCluster(image, clusterName string) error {
-	cmd := exec.Command("kind", "load", "docker-image", image, "--name", clusterName)
-	_, err := Run(cmd)
-	return err
-}
-
-// KindDeleteCluster deletes a kind cluster by name.
-func KindDeleteCluster(name string) error {
-	cmd := exec.Command("kind", "delete", "cluster", "--name", name)
-	_, err := Run(cmd)
-	return err
-}
-
-// KindCreateCluster creates a kind cluster with the given name and wait duration.
-func KindCreateCluster(name string, wait time.Duration) error {
-	cmd := exec.Command("kind", "create", "cluster", "--name", name, "--wait", wait.String())
+	kindOptions := []string{"load", "docker-image", name, "--name", cluster}
+	cmd := exec.Command("kind", kindOptions...)
 	_, err := Run(cmd)
 	return err
 }

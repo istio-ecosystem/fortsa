@@ -17,42 +17,26 @@ limitations under the License.
 package main
 
 import (
-	"context"
 	"crypto/tls"
 	"flag"
-	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
-	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
-	"github.com/spf13/pflag"
-	admissionregv1 "k8s.io/api/admissionregistration/v1"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	crwebhook "sigs.k8s.io/controller-runtime/pkg/webhook"
-
+	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	// +kubebuilder:scaffold:imports
-
-	"github.com/istio-ecosystem/fortsa/internal/controller"
-	"github.com/istio-ecosystem/fortsa/internal/webhook"
 )
 
 var (
@@ -60,30 +44,8 @@ var (
 	setupLog = ctrl.Log.WithName("setup")
 )
 
-var (
-	Version   = "" // set at compile time with -ldflags "-X main.Version=x.y.z"
-	Commit    = "" // set at compile time with -ldflags "-X main.Commit=..."
-	BuildTime = "" // set at compile time with -ldflags "-X main.BuildTime=..." (ISO format, e.g. 2025-02-25T14:30:00Z)
-)
-
-// parseSkipNamespaces splits a comma-separated string into non-empty trimmed namespace names.
-func parseSkipNamespaces(s string) []string {
-	if s == "" {
-		return nil
-	}
-	parts := strings.Split(s, ",")
-	var out []string
-	for _, p := range parts {
-		if trimmed := strings.TrimSpace(p); trimmed != "" {
-			out = append(out, trimmed)
-		}
-	}
-	return out
-}
-
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(corev1.AddToScheme(scheme))
 
 	// +kubebuilder:scaffold:scheme
 }
@@ -91,71 +53,37 @@ func init() {
 // nolint:gocyclo
 func main() {
 	var metricsAddr string
+	var metricsCertPath, metricsCertName, metricsCertKey string
+	var webhookCertPath, webhookCertName, webhookCertKey string
 	var enableLeaderElection bool
-	var dryRun bool
-	var compareHub bool
-	var restartDelay time.Duration
-	var istiodConfigReadDelay time.Duration
-	var reconcilePeriod time.Duration
-	var skipNamespaces string
 	var probeAddr string
 	var secureMetrics bool
-	var webhookCertPath, webhookCertName, webhookCertKey string
-	var metricsCertPath, metricsCertName, metricsCertKey string
 	var enableHTTP2 bool
-	var showVersion bool
 	var tlsOpts []func(*tls.Config)
-	pflag.BoolVar(&showVersion, "version", false, "Print version information and exit.")
-	pflag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
-	pflag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
-	pflag.BoolVar(&enableLeaderElection, "leader-elect", true, "Enable leader election for controller manager.")
-	pflag.BoolVar(&secureMetrics, "metrics-secure", true,
+	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
+		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
+	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
+	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
+		"Enable leader election for controller manager. "+
+			"Enabling this will ensure there is only one active controller manager.")
+	flag.BoolVar(&secureMetrics, "metrics-secure", true,
 		"If set, the metrics endpoint is served securely via HTTPS. Use --metrics-secure=false to use HTTP instead.")
-	pflag.StringVar(&webhookCertPath, "webhook-cert-path", "", "The directory that contains the webhook certificate.")
-	pflag.StringVar(&webhookCertName, "webhook-cert-name", "tls.crt", "The name of the webhook certificate file.")
-	pflag.StringVar(&webhookCertKey, "webhook-cert-key", "tls.key", "The name of the webhook key file.")
-	pflag.StringVar(&metricsCertPath, "metrics-cert-path", "",
+	flag.StringVar(&webhookCertPath, "webhook-cert-path", "", "The directory that contains the webhook certificate.")
+	flag.StringVar(&webhookCertName, "webhook-cert-name", "tls.crt", "The name of the webhook certificate file.")
+	flag.StringVar(&webhookCertKey, "webhook-cert-key", "tls.key", "The name of the webhook key file.")
+	flag.StringVar(&metricsCertPath, "metrics-cert-path", "",
 		"The directory that contains the metrics server certificate.")
-	pflag.StringVar(&metricsCertName, "metrics-cert-name", "tls.crt", "The name of the metrics server certificate file.")
-	pflag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
-	pflag.BoolVar(&enableHTTP2, "enable-http2", false,
+	flag.StringVar(&metricsCertName, "metrics-cert-name", "tls.crt", "The name of the metrics server certificate file.")
+	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
+	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
-	pflag.BoolVar(&dryRun, "dry-run", false, "If true, log what would be done without annotating workloads.")
-	pflag.BoolVar(&compareHub, "compare-hub", false,
-		"If true, require container image registry to match ConfigMap hub when detecting outdated pods.")
-	pflag.DurationVar(&restartDelay, "restart-delay", 0,
-		"Delay between restarting each workload (e.g. 5s). Use 0 for no delay.")
-	pflag.DurationVar(&istiodConfigReadDelay, "istiod-config-read-delay", 10*time.Second,
-		"Wait for Istiod to read the updated ConfigMap before scanning (e.g. 10s). Use 0 to skip.")
-	pflag.DurationVar(&reconcilePeriod, "reconcile-period", 1*time.Hour,
-		"Period between full reconciliations of all istio-sidecar-injector ConfigMaps. "+
-			"Use 0 to disable periodic reconciliation.")
-	pflag.StringVar(&skipNamespaces, "skip-namespaces", "kube-system,istio-system",
-		"Comma-separated list of namespaces to skip when scanning pods for outdated sidecars.")
-
-	zapOpts := zap.Options{
+	opts := zap.Options{
 		Development: true,
 	}
-	zapOpts.BindFlags(flag.CommandLine)
-	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
-	pflag.Parse()
+	opts.BindFlags(flag.CommandLine)
+	flag.Parse()
 
-	if showVersion {
-		v := Version
-		if v == "" {
-			v = "dev"
-		}
-		_, _ = fmt.Fprintf(os.Stdout, "fortsa version %s\n", v)
-		if Commit != "" {
-			_, _ = fmt.Fprintf(os.Stdout, "  commit: %s\n", Commit)
-		}
-		if BuildTime != "" {
-			_, _ = fmt.Fprintf(os.Stdout, "  build time: %s\n", BuildTime)
-		}
-		os.Exit(0)
-	}
-
-	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&zapOpts)))
+	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
@@ -197,11 +125,14 @@ func main() {
 		})
 	}
 
-	webhookServer := crwebhook.NewServer(crwebhook.Options{
+	webhookServer := webhook.NewServer(webhook.Options{
 		TLSOpts: webhookTLSOpts,
 	})
 
-	// Metrics endpoint options
+	// Metrics endpoint is enabled in 'config/default/kustomization.yaml'. The Metrics options configure the server.
+	// More info:
+	// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.21.0/pkg/metrics/server
+	// - https://book.kubebuilder.io/reference/metrics.html
 	metricsServerOptions := metricsserver.Options{
 		BindAddress:   metricsAddr,
 		SecureServing: secureMetrics,
@@ -209,9 +140,21 @@ func main() {
 	}
 
 	if secureMetrics {
+		// FilterProvider is used to protect the metrics endpoint with authn/authz.
+		// These configurations ensure that only authorized users and service accounts
+		// can access the metrics endpoint. The RBAC are configured in 'config/rbac/kustomization.yaml'. More info:
+		// https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.21.0/pkg/metrics/filters#WithAuthenticationAndAuthorization
 		metricsServerOptions.FilterProvider = filters.WithAuthenticationAndAuthorization
 	}
 
+	// If the certificate is not specified, controller-runtime will automatically
+	// generate self-signed certificates for the metrics server. While convenient for development and testing,
+	// this setup is not recommended for production.
+	//
+	// TODO(user): If you enable certManager, uncomment the following lines:
+	// - [METRICS-WITH-CERTS] at config/default/kustomization.yaml to generate and use certificates
+	// managed by cert-manager for the metrics server.
+	// - [PROMETHEUS-WITH-CERTS] at config/prometheus/kustomization.yaml for TLS certification.
 	if len(metricsCertPath) > 0 {
 		setupLog.Info("Initializing metrics certificate watcher using provided certificates",
 			"metrics-cert-path", metricsCertPath, "metrics-cert-name", metricsCertName, "metrics-cert-key", metricsCertKey)
@@ -222,7 +165,7 @@ func main() {
 			filepath.Join(metricsCertPath, metricsCertKey),
 		)
 		if err != nil {
-			setupLog.Error(err, "Failed to initialize metrics certificate watcher")
+			setupLog.Error(err, "to initialize metrics certificate watcher", "error", err)
 			os.Exit(1)
 		}
 
@@ -255,35 +198,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	webhookClient := webhook.NewWebhookClient(mgr.GetClient())
-	reconciler := controller.NewConfigMapReconciler(
-		mgr.GetClient(), mgr.GetScheme(), dryRun, compareHub, restartDelay, istiodConfigReadDelay,
-		parseSkipNamespaces(skipNamespaces), webhookClient)
-
-	fortsaController := ctrl.NewControllerManagedBy(mgr).
-		For(&corev1.ConfigMap{}, builder.WithPredicates(predicate.NewPredicateFuncs(controller.ConfigMapFilter()))).
-		Watches(
-			&admissionregv1.MutatingWebhookConfiguration{},
-			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
-				return []reconcile.Request{controller.PeriodicReconcileRequest()}
-			}),
-			builder.WithPredicates(predicate.NewPredicateFuncs(controller.MutatingWebhookFilter())),
-		).
-		Watches(
-			&corev1.Namespace{},
-			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
-				return []reconcile.Request{controller.NamespaceReconcileRequest(obj.GetName())}
-			}),
-			builder.WithPredicates(controller.NamespaceFilter()),
-		)
-	if reconcilePeriod > 0 {
-		fortsaController = fortsaController.WatchesRawSource(controller.NewPeriodicReconcileSource(reconcilePeriod))
-	}
-	err = fortsaController.Complete(reconciler)
-	if err != nil {
-		setupLog.Error(err, "unable to create controller")
-		os.Exit(1)
-	}
+	// +kubebuilder:scaffold:builder
 
 	if metricsCertWatcher != nil {
 		setupLog.Info("Adding metrics certificate watcher to manager")
@@ -310,11 +225,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if dryRun {
-		setupLog.Info("starting manager in dry-run mode (no workloads will be annotated)")
-	} else {
-		setupLog.Info("starting manager")
-	}
+	setupLog.Info("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)

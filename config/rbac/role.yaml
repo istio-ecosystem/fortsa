@@ -6,35 +6,6 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: manager-role
 rules:
-  # ConfigMaps (controller filters to istio-system)
-  - apiGroups: [""]
-    resources: ["configmaps"]
-    verbs: ["get", "list", "watch"]
-  # Namespaces for istio.io/rev label fallback
-  - apiGroups: [""]
-    resources: ["namespaces"]
-    verbs: ["get", "list", "watch"]
-  # Pods in all namespaces
-  - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["list", "get", "watch"]
-  # Deployments, StatefulSets, DaemonSets in all namespaces
-  - apiGroups: ["apps"]
-    resources: ["deployments", "statefulsets", "daemonsets"]
-    verbs: ["get", "list", "watch", "patch"]
-  # ReplicaSets, ControllerRevisions for owner traversal
-  - apiGroups: ["apps"]
-    resources: ["replicasets", "controllerrevisions"]
-    verbs: ["get", "list", "watch"]
-  # Leases for leader election
-  - apiGroups: ["coordination.k8s.io"]
-    resources: ["leases"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  # Events for leader election
-  - apiGroups: [""]
-    resources: ["events"]
-    verbs: ["create", "patch"]
-  # MutatingWebhookConfiguration for caBundle (TLS verification)
-  - apiGroups: ["admissionregistration.k8s.io"]
-    resources: ["mutatingwebhookconfigurations"]
-    verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
