@@ -73,6 +73,15 @@ func waitOrContextDone(ctx context.Context, d time.Duration) error {
 	}
 }
 
+// awaitIstiodConfigReadDelay waits for Istiod to read updated config before scanning.
+// No-op if istiodConfigReadDelay is 0.
+func (r *ConfigMapReconciler) awaitIstiodConfigReadDelay(ctx context.Context) error {
+	if r.istiodConfigReadDelay <= 0 {
+		return nil
+	}
+	return waitOrContextDone(ctx, r.istiodConfigReadDelay)
+}
+
 // fetchTagToRevision lists istio-revision-tag-* MutatingWebhookConfigurations and builds
 // a tag-to-revision map from istio.io/tag and istio.io/rev labels.
 func fetchTagToRevision(ctx context.Context, c client.Client) (map[string]string, error) {
@@ -206,20 +215,20 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// Wait for Istiod to read the updated ConfigMap before scanning (webhook uses Istiod's config)
 	// TODO: This is a hack... We should find a better mechanism.
-	if r.istiodConfigReadDelay > 0 {
-		if err := waitOrContextDone(ctx, r.istiodConfigReadDelay); err != nil {
-			return ctrl.Result{}, err
-		}
+	if err := r.awaitIstiodConfigReadDelay(ctx); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	return r.fetchTagMappingAndScan(ctx, nil)
 }
 
 // reconcileNamespace performs a namespace-scoped reconciliation when Istio labels change on a namespace.
-// Skips istiodConfigReadDelay (not needed for namespace label changes) and scans only pods in that namespace.
 func (r *ConfigMapReconciler) reconcileNamespace(ctx context.Context, namespace string) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("reconciling namespace (Istio label change)", "namespace", namespace)
+	if err := r.awaitIstiodConfigReadDelay(ctx); err != nil {
+		return ctrl.Result{}, err
+	}
 	return r.fetchTagMappingAndScan(ctx, []string{namespace})
 }
 
@@ -249,6 +258,9 @@ func (r *ConfigMapReconciler) reconcileAll(ctx context.Context) (ctrl.Result, er
 		r.setCache(client.ObjectKeyFromObject(cm).String(), vals.Revision, configmap.GetConfigMapLastModified(cm))
 	}
 
+	if err := r.awaitIstiodConfigReadDelay(ctx); err != nil {
+		return ctrl.Result{}, err
+	}
 	return r.fetchTagMappingAndScan(ctx, nil)
 }
 
