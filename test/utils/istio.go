@@ -35,7 +35,7 @@ func DetectOSArch() (osName, arch string) {
 	switch runtime.GOOS {
 	case "darwin":
 		osName = "osx"
-	case "linux": //nolint:goconst
+	case "linux":
 		osName = "linux"
 	default:
 		osName = "linux"
@@ -65,7 +65,7 @@ func DownloadIstio(version, tmpDir string) (istioDir string, err error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to download Istio %s: %w", version, err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("failed to download Istio %s: HTTP %d", version, resp.StatusCode)
@@ -75,7 +75,7 @@ func DownloadIstio(version, tmpDir string) (istioDir string, err error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to create gzip reader: %w", err)
 	}
-	defer func() { _ = gzReader.Close() }()
+	defer gzReader.Close()
 
 	tarReader := tar.NewReader(gzReader)
 	for {
@@ -102,10 +102,10 @@ func DownloadIstio(version, tmpDir string) (istioDir string, err error) {
 				return "", fmt.Errorf("failed to create file %s: %w", target, err)
 			}
 			if _, err := io.Copy(outFile, tarReader); err != nil {
-				_ = outFile.Close()
+				outFile.Close()
 				return "", fmt.Errorf("failed to write file %s: %w", target, err)
 			}
-			_ = outFile.Close()
+			outFile.Close()
 		}
 	}
 
@@ -147,21 +147,6 @@ func RunIstioTagSet(istioctl, tag, revision string, overwrite bool) error {
 		args = append(args, "--overwrite")
 	}
 	cmd := exec.Command(istioctl, args...)
-	_, err := Run(cmd)
-	return err
-}
-
-// WaitForIstioReady waits for the istiod deployment to be available in istio-system.
-// For revisioned installs (e.g. revision "1-28-4"), pass the revision; for default install, pass "".
-func WaitForIstioReady(revision string) error {
-	deployName := "istiod"
-	if revision != "" {
-		deployName = "istiod-" + revision
-	}
-	cmd := exec.Command("kubectl", "wait", "deployment/"+deployName,
-		"--for", "condition=Available",
-		"-n", "istio-system",
-		"--timeout", "120s")
 	_, err := Run(cmd)
 	return err
 }
