@@ -5,7 +5,7 @@ on:
 
 jobs:
   lint:
-    name: Run on Ubuntu
+    name: Run linter
     runs-on: ubuntu-latest
     steps:
       - name: Clone the code
@@ -16,7 +16,7 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Run linter
+      - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
           version: v2.10.1
