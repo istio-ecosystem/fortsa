@@ -61,9 +61,9 @@ var (
 )
 
 var (
-	Version    = "" // set at compile time with -ldflags "-X main.Version=x.y.z"
-	Commit     = "" // set at compile time with -ldflags "-X main.Commit=..."
-	CommitDate = "" // set at compile time with -ldflags "-X main.CommitDate=..."
+	Version   = "" // set at compile time with -ldflags "-X main.Version=x.y.z"
+	Commit    = "" // set at compile time with -ldflags "-X main.Commit=..."
+	BuildTime = "" // set at compile time with -ldflags "-X main.BuildTime=..." (ISO format, e.g. 2025-02-25T14:30:00Z)
 )
 
 // parseSkipNamespaces splits a comma-separated string into non-empty trimmed namespace names.
@@ -149,8 +149,8 @@ func main() {
 		if Commit != "" {
 			_, _ = fmt.Fprintf(os.Stdout, "  commit: %s\n", Commit)
 		}
-		if CommitDate != "" {
-			_, _ = fmt.Fprintf(os.Stdout, "  commit date: %s\n", CommitDate)
+		if BuildTime != "" {
+			_, _ = fmt.Fprintf(os.Stdout, "  build time: %s\n", BuildTime)
 		}
 		os.Exit(0)
 	}
