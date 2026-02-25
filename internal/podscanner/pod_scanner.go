@@ -110,6 +110,126 @@ type ScanOptions struct {
 	LimitToNamespaces []string
 }
 
+// listPods lists pods according to LimitToNamespaces: single ns, multiple nss, or all.
+func listPods(ctx context.Context, c client.Client, opts ScanOptions) (corev1.PodList, error) {
+	var podList corev1.PodList
+	if len(opts.LimitToNamespaces) == 1 {
+		if err := c.List(ctx, &podList, client.InNamespace(opts.LimitToNamespaces[0])); err != nil {
+			return podList, err
+		}
+	} else if len(opts.LimitToNamespaces) > 1 {
+		limitSet := make(map[string]struct{})
+		for _, ns := range opts.LimitToNamespaces {
+			if ns != "" {
+				limitSet[ns] = struct{}{}
+			}
+		}
+		for ns := range limitSet {
+			var nsList corev1.PodList
+			if err := c.List(ctx, &nsList, client.InNamespace(ns)); err != nil {
+				return podList, err
+			}
+			podList.Items = append(podList.Items, nsList.Items...)
+		}
+	} else {
+		if err := c.List(ctx, &podList); err != nil {
+			return podList, err
+		}
+	}
+	return podList, nil
+}
+
+// shouldSkipPodForConfigMap returns true if the pod was created after the ConfigMap was last
+// updated (and thus was injected with current config). When using a tag, also considers the tag's
+// MWC LastModified: if the tag was modified after the pod was created, we must scan.
+func shouldSkipPodForConfigMap(pod *corev1.Pod, revision, revOrTag string, lastModifiedByRevision, lastModifiedByTag map[string]time.Time, opts ScanOptions) bool {
+	skip := false
+	if lastModified, ok := lastModifiedByRevision[revision]; ok && !lastModified.IsZero() {
+		effectiveLastModified := lastModified.Add(opts.IstiodConfigReadDelay)
+		if !pod.CreationTimestamp.Time.Before(effectiveLastModified) {
+			skip = true
+		}
+	}
+	if skip && revOrTag != revision {
+		// Using a tag - override skip if tag's MWC was modified after pod was created
+		if tagLastModified, ok := lastModifiedByTag[revOrTag]; ok && !tagLastModified.IsZero() {
+			tagEffective := tagLastModified.Add(opts.IstiodConfigReadDelay)
+			if pod.CreationTimestamp.Time.Before(tagEffective) {
+				skip = false // Tag was modified after pod - must scan
+			}
+		} else {
+			skip = false // No tag lastModified info - be conservative, scan
+		}
+	}
+	return skip
+}
+
+// processPodForOutdatedSidecar checks a single pod for an outdated Istio sidecar. Returns the
+// WorkloadRef when the pod has an outdated sidecar and should be added to results; nil when skipped.
+func (s *PodScanner) processPodForOutdatedSidecar(ctx context.Context, pod *corev1.Pod, tagToRevision map[string]string, lastModifiedByRevision, lastModifiedByTag map[string]time.Time, opts ScanOptions) *WorkloadRef {
+	logger := log.FromContext(ctx)
+
+	ref, err := s.findWorkloadOwner(ctx, pod)
+	if err != nil {
+		logger.Error(err, "failed to find workload owner", "pod", pod.Namespace+"/"+pod.Name)
+		return nil
+	}
+	if ref == nil {
+		logger.Info("no restartableworkload owner found", "pod", pod.Namespace+"/"+pod.Name)
+		return nil
+	}
+
+	revOrTag, err := s.getIstioRevFromWorkloadOrNamespace(ctx, ref)
+	if err != nil {
+		logger.Error(err, "failed to get istio.io/rev from workload or namespace", "workload", ref.NamespacedName)
+		return nil
+	}
+	if revOrTag == "" {
+		logger.V(1).Info("namespace has no istio.io/rev or istio-injection=enabled, skipping", "workload", ref.NamespacedName)
+		return nil
+	}
+	revision := revOrTag
+	if r, ok := tagToRevision[revOrTag]; ok {
+		revision = r
+	}
+
+	if shouldSkipPodForConfigMap(pod, revision, revOrTag, lastModifiedByRevision, lastModifiedByTag, opts) {
+		return nil
+	}
+
+	logger.Info("found workload", "workload", ref.Namespace+"/"+ref.Name)
+
+	templatePod, err := s.buildPodFromWorkload(ctx, ref)
+	if err != nil {
+		logger.Error(err, "failed to build pod from workload", "workload", ref.NamespacedName)
+		return nil
+	}
+
+	mutated, err := s.webhookCaller.CallWebhook(ctx, templatePod, revision, revOrTag == "default")
+	if err != nil {
+		logger.Error(err, "webhook call failed", "pod", pod.Namespace+"/"+pod.Name)
+		return nil
+	}
+
+	expectedImage := getIstioProxyImage(mutated)
+	currentImage := getIstioProxyImage(pod)
+	logger.V(1).Info("expected image", "expected", expectedImage, "current", currentImage, "pod", pod.Namespace+"/"+pod.Name)
+	if expectedImage == "" {
+		return nil
+	}
+	if imagesMatch(currentImage, expectedImage, opts.CompareHub) {
+		return nil
+	}
+
+	logger.Info("outdated image",
+		"pod", pod.Namespace+"/"+pod.Name,
+		"revision", revision,
+		"current", currentImage,
+		"expected", expectedImage)
+
+	return ref
+}
+
 // ScanOutdatedPods lists all Pods, finds each pod's controller (Deployment/StatefulSet/DaemonSet),
 // builds a pod from the workload template, submits it to the Istio injection webhook, and compares
 // the mutated response's istio-proxy image with the current pod. Returns WorkloadRefs for pods
@@ -126,29 +246,9 @@ func (s *PodScanner) ScanOutdatedPods(ctx context.Context, lastModifiedByRevisio
 		tagToRevision = map[string]string{}
 	}
 
-	var podList corev1.PodList
-	if len(opts.LimitToNamespaces) == 1 {
-		if err := s.client.List(ctx, &podList, client.InNamespace(opts.LimitToNamespaces[0])); err != nil {
-			return nil, err
-		}
-	} else if len(opts.LimitToNamespaces) > 1 {
-		limitSet := make(map[string]struct{})
-		for _, ns := range opts.LimitToNamespaces {
-			if ns != "" {
-				limitSet[ns] = struct{}{}
-			}
-		}
-		for ns := range limitSet {
-			var nsList corev1.PodList
-			if err := s.client.List(ctx, &nsList, client.InNamespace(ns)); err != nil {
-				return nil, err
-			}
-			podList.Items = append(podList.Items, nsList.Items...)
-		}
-	} else {
-		if err := s.client.List(ctx, &podList); err != nil {
-			return nil, err
-		}
+	podList, err := listPods(ctx, s.client, opts)
+	if err != nil {
+		return nil, err
 	}
 
 	seen := make(map[types.NamespacedName]struct{})
@@ -169,87 +269,10 @@ func (s *PodScanner) ScanOutdatedPods(ctx context.Context, lastModifiedByRevisio
 
 		logger.Info("scanning pod", "pod", pod.Namespace+"/"+pod.Name)
 
-		ref, err := s.findWorkloadOwner(ctx, pod)
-		if err != nil {
-			logger.Error(err, "failed to find workload owner", "pod", pod.Namespace+"/"+pod.Name)
-			continue
-		}
+		ref := s.processPodForOutdatedSidecar(ctx, pod, tagToRevision, lastModifiedByRevision, lastModifiedByTag, opts)
 		if ref == nil {
-			logger.Info("no restartableworkload owner found", "pod", pod.Namespace+"/"+pod.Name)
 			continue
 		}
-
-		revOrTag, err := s.getIstioRevFromWorkloadOrNamespace(ctx, ref)
-		if err != nil {
-			logger.Error(err, "failed to get istio.io/rev from workload or namespace", "workload", ref.NamespacedName)
-			continue
-		}
-		if revOrTag == "" {
-			logger.V(1).Info("namespace has no istio.io/rev or istio-injection=enabled, skipping", "workload", ref.NamespacedName)
-			continue
-		}
-		revision := revOrTag
-		if r, ok := tagToRevision[revOrTag]; ok {
-			revision = r
-		}
-
-		// Skip pods created after the ConfigMap was last updated; they were injected with the current config.
-		// Add IstiodConfigReadDelay to LastModified: pods created in that window may have been
-		// injected before Istiod loaded the new config, so we still scan them.
-		// When using a tag, also require the tag's MWC to not have been modified after the pod was created;
-		// otherwise the tag-to-revision mapping may have changed and we must scan.
-		skip := false
-		if lastModified, ok := lastModifiedByRevision[revision]; ok && !lastModified.IsZero() {
-			effectiveLastModified := lastModified.Add(opts.IstiodConfigReadDelay)
-			if !pod.CreationTimestamp.Time.Before(effectiveLastModified) {
-				skip = true
-			}
-		}
-		if skip && revOrTag != revision {
-			// Using a tag - override skip if tag's MWC was modified after pod was created
-			if tagLastModified, ok := lastModifiedByTag[revOrTag]; ok && !tagLastModified.IsZero() {
-				tagEffective := tagLastModified.Add(opts.IstiodConfigReadDelay)
-				if pod.CreationTimestamp.Time.Before(tagEffective) {
-					skip = false // Tag was modified after pod - must scan
-				}
-			} else {
-				skip = false // No tag lastModified info - be conservative, scan
-			}
-		}
-		if skip {
-			continue
-		}
-
-		logger.Info("found workload", "workload", ref.Namespace+"/"+ref.Name)
-
-		templatePod, err := s.buildPodFromWorkload(ctx, ref)
-		if err != nil {
-			logger.Error(err, "failed to build pod from workload", "workload", ref.NamespacedName)
-			continue
-		}
-
-		mutated, err := s.webhookCaller.CallWebhook(ctx, templatePod, revision, revOrTag == "default")
-		if err != nil {
-			logger.Error(err, "webhook call failed", "pod", pod.Namespace+"/"+pod.Name)
-			continue
-		}
-
-		expectedImage := getIstioProxyImage(mutated)
-		currentImage := getIstioProxyImage(pod)
-		logger.V(1).Info("expected image", "expected", expectedImage, "current", currentImage, "pod", pod.Namespace+"/"+pod.Name)
-		if expectedImage == "" {
-			continue
-		}
-		if imagesMatch(currentImage, expectedImage, opts.CompareHub) {
-			continue
-		}
-
-		logger.Info("outdated image",
-			"pod", pod.Namespace+"/"+pod.Name,
-			"revision", revision,
-			"current", currentImage,
-			"expected", expectedImage)
-
 		if _, ok := seen[ref.NamespacedName]; ok {
 			continue
 		}
