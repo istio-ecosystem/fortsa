@@ -289,7 +289,7 @@ func (s *PodScanner) ScanOutdatedPods(ctx context.Context, lastModifiedByRevisio
 // has istio.io/rev and namespace lacks istio-injection=enabled (caller should skip the pod).
 func (s *PodScanner) getIstioRevFromWorkloadOrNamespace(ctx context.Context, ref *WorkloadRef) (string, error) {
 	switch ref.Kind {
-	case "Deployment":
+	case "Deployment": //nolint:goconst
 		var dep appsv1.Deployment
 		if err := s.client.Get(ctx, ref.NamespacedName, &dep); err != nil {
 			return "", err
@@ -298,7 +298,7 @@ func (s *PodScanner) getIstioRevFromWorkloadOrNamespace(ctx context.Context, ref
 			return v, nil
 		}
 		// Template has no istio.io/rev; continue to namespace check below
-	case "StatefulSet":
+	case "StatefulSet": //nolint:goconst
 		var sts appsv1.StatefulSet
 		if err := s.client.Get(ctx, ref.NamespacedName, &sts); err != nil {
 			return "", err
@@ -307,7 +307,7 @@ func (s *PodScanner) getIstioRevFromWorkloadOrNamespace(ctx context.Context, ref
 			return v, nil
 		}
 		// Template has no istio.io/rev; continue to namespace check below
-	case "DaemonSet":
+	case "DaemonSet": //nolint:goconst
 		var ds appsv1.DaemonSet
 		if err := s.client.Get(ctx, ref.NamespacedName, &ds); err != nil {
 			return "", err
