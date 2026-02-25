@@ -114,7 +114,7 @@ func waitForFortsaRestart(namespace, deployment, initialPod string) string {
 
 func getProxyImage(namespace, podName string) string {
 	cmd := exec.Command("kubectl", "get", "pod", podName,
-		"-o", `jsonpath={.spec.containers[?(@.name=="istio-proxy")].image}`,
+		"-o", `go-template={{range .spec.containers}}{{if eq .name "istio-proxy"}}{{.image}}{{end}}{{end}}`,
 		"-n", namespace)
 	output, err := utils.Run(cmd)
 	Expect(err).NotTo(HaveOccurred())
