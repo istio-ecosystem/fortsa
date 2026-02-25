@@ -96,11 +96,17 @@ func main() {
 	pflag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
 	pflag.BoolVar(&dryRun, "dry-run", false, "If true, log what would be done without annotating workloads.")
-	pflag.BoolVar(&compareHub, "compare-hub", false, "If true, require container image registry to match ConfigMap hub when detecting outdated pods.")
-	pflag.DurationVar(&restartDelay, "restart-delay", 0, "Delay between restarting each workload (e.g. 5s). Use 0 for no delay.")
-	pflag.DurationVar(&istiodConfigReadDelay, "istiod-config-read-delay", 10*time.Second, "Wait for Istiod to read the updated ConfigMap before scanning (e.g. 10s). Use 0 to skip.")
-	pflag.DurationVar(&reconcilePeriod, "reconcile-period", 1*time.Hour, "Period between full reconciliations of all istio-sidecar-injector ConfigMaps. Use 0 to disable periodic reconciliation.")
-	pflag.StringVar(&skipNamespaces, "skip-namespaces", "kube-system,istio-system", "Comma-separated list of namespaces to skip when scanning pods for outdated sidecars.")
+	pflag.BoolVar(&compareHub, "compare-hub", false,
+		"If true, require container image registry to match ConfigMap hub when detecting outdated pods.")
+	pflag.DurationVar(&restartDelay, "restart-delay", 0,
+		"Delay between restarting each workload (e.g. 5s). Use 0 for no delay.")
+	pflag.DurationVar(&istiodConfigReadDelay, "istiod-config-read-delay", 10*time.Second,
+		"Wait for Istiod to read the updated ConfigMap before scanning (e.g. 10s). Use 0 to skip.")
+	pflag.DurationVar(&reconcilePeriod, "reconcile-period", 1*time.Hour,
+		"Period between full reconciliations of all istio-sidecar-injector ConfigMaps. "+
+			"Use 0 to disable periodic reconciliation.")
+	pflag.StringVar(&skipNamespaces, "skip-namespaces", "kube-system,istio-system",
+		"Comma-separated list of namespaces to skip when scanning pods for outdated sidecars.")
 
 	zapOpts := zap.Options{
 		Development: true,
@@ -210,7 +216,9 @@ func main() {
 	}
 
 	webhookClient := webhook.NewWebhookClient(mgr.GetClient())
-	reconciler := controller.NewConfigMapReconciler(mgr.GetClient(), mgr.GetScheme(), dryRun, compareHub, restartDelay, istiodConfigReadDelay, parseSkipNamespaces(skipNamespaces), webhookClient)
+	reconciler := controller.NewConfigMapReconciler(
+		mgr.GetClient(), mgr.GetScheme(), dryRun, compareHub, restartDelay, istiodConfigReadDelay,
+		parseSkipNamespaces(skipNamespaces), webhookClient)
 
 	fortsaController := ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.ConfigMap{}, builder.WithPredicates(predicate.NewPredicateFuncs(controller.ConfigMapFilter()))).
