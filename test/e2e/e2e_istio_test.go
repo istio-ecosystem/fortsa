@@ -195,7 +195,7 @@ var _ = Describe("Istio in-place upgrade", Label("Istio"), Ordered, func() {
 		tmpDir      string
 		istioctlNew string
 		initialPod  string
-		testName    string = "in-place-upgrade"
+		testName    = "in-place-upgrade"
 	)
 
 	BeforeAll(func() {
@@ -252,7 +252,7 @@ var _ = Describe("Istio revision tags", Label("Istio"), Ordered, func() {
 		tmpDir      string
 		istioctlNew string
 		initialPod  string
-		testName    string = "revision-tags"
+		testName    = "revision-tags"
 	)
 
 	BeforeAll(func() {
@@ -321,7 +321,7 @@ var _ = Describe("Istio namespace labels", Label("Istio"), Ordered, func() {
 		clusterName string
 		tmpDir      string
 		initialPod  string
-		testName    string = "namespace-labels"
+		testName    = "namespace-labels"
 	)
 
 	BeforeAll(func() {
