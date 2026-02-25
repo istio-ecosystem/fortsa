@@ -89,6 +89,10 @@ var _ = Describe("Manager", Ordered, func() {
 		By("removing manager namespace")
 		cmd = exec.Command("kubectl", "delete", "ns", namespace)
 		_, _ = utils.Run(cmd)
+
+		By("deleting kind cluster")
+		_ = utils.KindDeleteCluster(os.Getenv("KIND_CLUSTER"))
+
 	})
 
 	// After each test, check for failures and collect logs, events,
