@@ -214,6 +214,7 @@ var _ = Describe("Istio in-place upgrade", Label("Istio"), Ordered, func() {
 
 		By("installing Istio " + istioOldVersion())
 		Expect(utils.RunIstioInstall(istioctlOld, "", "minimal")).To(Succeed())
+		Expect(utils.WaitForIstioReady("")).To(Succeed())
 
 		deployHelloWorldAndWaitForSidecar("hello-world", "istio-injection=enabled")
 		deployFortsa()
@@ -274,9 +275,11 @@ var _ = Describe("Istio revision tags", Label("Istio"), Ordered, func() {
 
 		By("installing Istio " + istioOldVersion() + " (revision " + revisionOld + ")")
 		Expect(utils.RunIstioInstall(istioctlOld, revisionOld, "minimal")).To(Succeed())
+		Expect(utils.WaitForIstioReady(revisionOld)).To(Succeed())
 
 		By("installing Istio " + istioNewVersion() + " (revision " + revisionNew + ")")
 		Expect(utils.RunIstioInstall(istioctlNew, revisionNew, "minimal")).To(Succeed())
+		Expect(utils.WaitForIstioReady(revisionNew)).To(Succeed())
 
 		By("creating revision tags")
 		Expect(utils.RunIstioTagSet(istioctlNew, "stable", revisionOld, false)).To(Succeed())
@@ -343,9 +346,11 @@ var _ = Describe("Istio namespace labels", Label("Istio"), Ordered, func() {
 
 		By("installing Istio " + istioOldVersion() + " (revision " + revisionOld + ")")
 		Expect(utils.RunIstioInstall(istioctlOld, revisionOld, "minimal")).To(Succeed())
+		Expect(utils.WaitForIstioReady(revisionOld)).To(Succeed())
 
 		By("installing Istio " + istioNewVersion() + " (revision " + revisionNew + ")")
 		Expect(utils.RunIstioInstall(istioctlNew, revisionNew, "minimal")).To(Succeed())
+		Expect(utils.WaitForIstioReady(revisionNew)).To(Succeed())
 
 		By("creating revision tags")
 		Expect(utils.RunIstioTagSet(istioctlNew, "stable", revisionOld, false)).To(Succeed())
