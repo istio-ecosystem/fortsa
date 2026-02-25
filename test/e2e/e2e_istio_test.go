@@ -223,7 +223,7 @@ var _ = Describe("Istio in-place upgrade", Label("Istio"), Ordered, func() {
 
 	AfterAll(func() {
 		if tmpDir != "" {
-			os.RemoveAll(tmpDir)
+			_ = os.RemoveAll(tmpDir)
 		}
 		if os.Getenv("SKIP_CLEANUP") == "1" {
 			return
@@ -291,7 +291,7 @@ var _ = Describe("Istio revision tags", Label("Istio"), Ordered, func() {
 
 	AfterAll(func() {
 		if tmpDir != "" {
-			os.RemoveAll(tmpDir)
+			_ = os.RemoveAll(tmpDir)
 		}
 		if os.Getenv("SKIP_CLEANUP") == "1" {
 			return
@@ -359,7 +359,7 @@ var _ = Describe("Istio namespace labels", Label("Istio"), Ordered, func() {
 
 	AfterAll(func() {
 		if tmpDir != "" {
-			os.RemoveAll(tmpDir)
+			_ = os.RemoveAll(tmpDir)
 		}
 		if os.Getenv("SKIP_CLEANUP") == "1" {
 			return
