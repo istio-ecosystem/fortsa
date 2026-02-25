@@ -5,7 +5,7 @@
 # - use environment variables to overwrite this value (e.g export VERSION=0.0.2)
 # git tags should be of the format vX.Y.Z (semver-compliant)
 GIT_TAG := $(shell git describe --tags)
-GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+GIT_COMMIT ?= $(shell if [ -n "$$(git status --porcelain 2>/dev/null)" ]; then echo "uncommitted"; else git rev-parse --short HEAD 2>/dev/null || echo "unknown"; fi)
 BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "unknown")
 
 VERSION ?= $(GIT_TAG:v%=%)
