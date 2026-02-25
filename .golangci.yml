@@ -15,7 +15,7 @@ linters:
     - lll
     - misspell
     - nakedret
-    #- prealloc
+    - prealloc
     - revive
     - staticcheck
     - unconvert
