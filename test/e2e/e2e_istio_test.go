@@ -171,6 +171,15 @@ func deployHelloWorldAndWaitForSidecar(namespace, nsLabel string) {
 	_, err = utils.Run(cmd)
 	Expect(err).NotTo(HaveOccurred())
 
+	By("dumping pods across all namespaces")
+	cmd = exec.Command("kubectl", "get", "pods", "--all-namespaces")
+	output, err := utils.Run(cmd)
+	if err != nil {
+		_, _ = fmt.Fprintf(GinkgoWriter, "kubectl get pods failed: %v\n", err)
+	} else {
+		_, _ = fmt.Fprintf(GinkgoWriter, "Pods:\n%s\n", output)
+	}
+
 	verifySidecar := func(g Gomega) {
 		cmd := exec.Command("kubectl", "get", "pods", "-n", namespace, "-l", "app=helloworld",
 			"-o", "jsonpath={.items[0].spec.containers[*].name}")
