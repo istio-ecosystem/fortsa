@@ -141,6 +141,11 @@ test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expect
 	KIND_CLUSTER=$(KIND_CLUSTER) go test ./test/e2e/ -v -ginkgo.v
 	$(MAKE) cleanup-test-e2e
 
+.PHONY: test-e2e-istio
+test-e2e-istio: setup-test-e2e manifests generate fmt vet ## Run only the Istio e2e tests (revision tags, namespace labels, in-place upgrade).
+	KIND_CLUSTER=$(KIND_CLUSTER) go test ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="Istio"
+	$(MAKE) cleanup-test-e2e
+
 .PHONY: cleanup-test-e2e
 cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
 	@$(KIND) delete cluster --name $(KIND_CLUSTER)
