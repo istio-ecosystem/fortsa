@@ -30,7 +30,7 @@ import (
 )
 
 const (
-	istioClusterNameDefault = "fortsa-e2e"
+	istioClusterNameDefault = "fortsa-test-e2e"
 	istioOldVersionDefault  = "1.28.4"
 	istioNewVersionDefault  = "1.29.0"
 	restartWaitTimeout      = 5 * time.Minute
@@ -39,11 +39,11 @@ const (
 	restartedAtAnnotation   = "fortsa\\.scaffidi\\.net/restartedAt"
 )
 
-func istioClusterName() string {
-	if v := os.Getenv("CLUSTER_NAME"); v != "" {
-		return v
+func istioClusterName(suffix string) string {
+	if v := os.Getenv("KIND_CLUSTER"); v != "" {
+		return v + "-" + suffix
 	}
-	return istioClusterNameDefault
+	return istioClusterNameDefault + "-" + suffix
 }
 
 func istioOldVersion() string {
@@ -195,11 +195,12 @@ var _ = Describe("Istio in-place upgrade", Label("Istio"), Ordered, func() {
 		tmpDir      string
 		istioctlNew string
 		initialPod  string
+		testName    string = "in-place-upgrade"
 	)
 
 	BeforeAll(func() {
 		skipIfIstioToolsMissing()
-		clusterName = istioClusterName()
+		clusterName = istioClusterName(testName)
 		tmpDir = setupIstioCluster(clusterName)
 
 		By("downloading Istio versions")
@@ -228,7 +229,7 @@ var _ = Describe("Istio in-place upgrade", Label("Istio"), Ordered, func() {
 			return
 		}
 		By("deleting kind cluster")
-		_ = utils.KindDeleteCluster(clusterName)
+		_ = utils.KindDeleteCluster(istioClusterName(testName))
 	})
 
 	It("should restart helloworld deployment after Istio upgrade", func() {
@@ -251,11 +252,12 @@ var _ = Describe("Istio revision tags", Label("Istio"), Ordered, func() {
 		tmpDir      string
 		istioctlNew string
 		initialPod  string
+		testName    string = "revision-tags"
 	)
 
 	BeforeAll(func() {
 		skipIfIstioToolsMissing()
-		clusterName = istioClusterName()
+		clusterName = istioClusterName(testName)
 		tmpDir = setupIstioCluster(clusterName)
 
 		By("downloading Istio versions")
@@ -295,7 +297,7 @@ var _ = Describe("Istio revision tags", Label("Istio"), Ordered, func() {
 			return
 		}
 		By("deleting kind cluster")
-		_ = utils.KindDeleteCluster(clusterName)
+		_ = utils.KindDeleteCluster(istioClusterName(testName))
 	})
 
 	It("should restart helloworld deployment in hello-stable after stable tag update", func() {
@@ -319,11 +321,12 @@ var _ = Describe("Istio namespace labels", Label("Istio"), Ordered, func() {
 		clusterName string
 		tmpDir      string
 		initialPod  string
+		testName    string = "namespace-labels"
 	)
 
 	BeforeAll(func() {
 		skipIfIstioToolsMissing()
-		clusterName = istioClusterName()
+		clusterName = istioClusterName(testName)
 		tmpDir = setupIstioCluster(clusterName)
 
 		By("downloading Istio versions")
@@ -362,7 +365,7 @@ var _ = Describe("Istio namespace labels", Label("Istio"), Ordered, func() {
 			return
 		}
 		By("deleting kind cluster")
-		_ = utils.KindDeleteCluster(clusterName)
+		_ = utils.KindDeleteCluster(istioClusterName(testName))
 	})
 
 	It("should restart helloworld deployment after namespace label change", func() {

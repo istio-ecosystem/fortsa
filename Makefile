@@ -120,7 +120,8 @@ test-integration: manifests generate fmt vet setup-envtest ## Run integration te
 # The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
 # CertManager is installed by default; skip with:
 # - CERT_MANAGER_INSTALL_SKIP=true
-KIND_CLUSTER ?= fortsa-test-e2e
+E2E_CLUSTER_PREFIX ?= fortsa-test-e2e
+KIND_CLUSTER ?= $(E2E_CLUSTER_PREFIX)
 
 .PHONY: setup-test-e2e
 setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
@@ -137,14 +138,12 @@ setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
 	esac
 
 .PHONY: test-e2e
-test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expected an isolated environment using Kind.
-	KIND_CLUSTER=$(KIND_CLUSTER) go test ./test/e2e/ -v -ginkgo.v
-	$(MAKE) cleanup-test-e2e
+test-e2e: manifests generate fmt vet ## Run the e2e tests. Expected an isolated environment using Kind.
+	KIND_CLUSTER=$(E2E_CLUSTER_PREFIX) go test ./test/e2e/ -v -ginkgo.v
 
 .PHONY: test-e2e-istio
-test-e2e-istio: setup-test-e2e manifests generate fmt vet ## Run only the Istio e2e tests (revision tags, namespace labels, in-place upgrade).
-	KIND_CLUSTER=$(KIND_CLUSTER) go test ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="Istio"
-	$(MAKE) cleanup-test-e2e
+test-e2e-istio: manifests generate fmt vet ## Run only the Istio e2e tests (revision tags, namespace labels, in-place upgrade).
+	KIND_CLUSTER=$(E2E_CLUSTER_PREFIX) go test ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="Istio"
 
 .PHONY: cleanup-test-e2e
 cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
