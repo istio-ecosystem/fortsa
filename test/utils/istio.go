@@ -35,7 +35,7 @@ func DetectOSArch() (osName, arch string) {
 	switch runtime.GOOS {
 	case "darwin":
 		osName = "osx"
-	case "linux":
+	case "linux": //nolint:goconst
 		osName = "linux"
 	default:
 		osName = "linux"

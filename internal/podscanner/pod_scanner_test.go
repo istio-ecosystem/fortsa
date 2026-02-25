@@ -695,7 +695,7 @@ func TestScanOutdatedPods_tagResolution(t *testing.T) {
 		if len(workloads) != 1 {
 			t.Errorf("want 1 workload, got %d", len(workloads))
 		}
-		if webhook.calledWithRevision != "1-20" {
+		if webhook.calledWithRevision != "1-20" { //nolint:goconst
 			t.Errorf("webhook called with revision %q, want 1-20 (resolved from tag canary)", webhook.calledWithRevision)
 		}
 	})
@@ -826,7 +826,7 @@ func TestScanOutdatedPods_istioInjectionLabel(t *testing.T) {
 		if len(workloads) != 1 {
 			t.Errorf("want 1 workload (istio-injection=enabled), got %d", len(workloads))
 		}
-		if webhook.calledWithRevision != "default" {
+		if webhook.calledWithRevision != "default" { //nolint:goconst
 			t.Errorf("webhook called with revision %q, want default (from istio-injection=enabled)", webhook.calledWithRevision)
 		}
 	})

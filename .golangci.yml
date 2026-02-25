@@ -8,7 +8,7 @@ linters:
     - dupl
     - errcheck
     - ginkgolinter
-    #- goconst
+    - goconst
     - gocyclo
     - govet
     - ineffassign
