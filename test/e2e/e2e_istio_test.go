@@ -181,8 +181,7 @@ func deployHelloWorldAndWaitForSidecar(namespace, nsLabel string) {
 	}
 
 	verifySidecar := func(g Gomega) {
-		cmd := exec.Command("kubectl", "get", "pods", "-n", namespace, "-l", "app=helloworld",
-			"-o", "jsonpath={.items[0].spec.containers[*].name}")
+		cmd := exec.Command("kubectl", "describe", "pod", "-n", namespace, "-l", "app=helloworld")
 		output, err := utils.Run(cmd)
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(output).To(ContainSubstring("istio-proxy"))
