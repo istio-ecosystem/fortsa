@@ -150,3 +150,18 @@ func RunIstioTagSet(istioctl, tag, revision string, overwrite bool) error {
 	_, err := Run(cmd)
 	return err
 }
+
+// WaitForIstioReady waits for the istiod deployment to be available in istio-system.
+// For revisioned installs (e.g. revision "1-28-4"), pass the revision; for default install, pass "".
+func WaitForIstioReady(revision string) error {
+	deployName := "istiod"
+	if revision != "" {
+		deployName = "istiod-" + revision
+	}
+	cmd := exec.Command("kubectl", "wait", "deployment/"+deployName,
+		"--for", "condition=Available",
+		"-n", "istio-system",
+		"--timeout", "120s")
+	_, err := Run(cmd)
+	return err
+}
