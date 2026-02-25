@@ -24,7 +24,12 @@ jobs:
 
       - name: Verify kind installation
         run: kind version
-
+      
+      # we want to pre-create the manager image to avoid the opaque build step in the tests 
+      - name: Run docker build to pre-create the manager image
+        run: |
+          make docker-build
+          
       - name: Running Test e2e
         run: |
           go mod tidy
