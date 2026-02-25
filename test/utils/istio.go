@@ -65,7 +65,7 @@ func DownloadIstio(version, tmpDir string) (istioDir string, err error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to download Istio %s: %w", version, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("failed to download Istio %s: HTTP %d", version, resp.StatusCode)
@@ -75,7 +75,7 @@ func DownloadIstio(version, tmpDir string) (istioDir string, err error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to create gzip reader: %w", err)
 	}
-	defer gzReader.Close()
+	defer func() { _ = gzReader.Close() }()
 
 	tarReader := tar.NewReader(gzReader)
 	for {
@@ -102,10 +102,10 @@ func DownloadIstio(version, tmpDir string) (istioDir string, err error) {
 				return "", fmt.Errorf("failed to create file %s: %w", target, err)
 			}
 			if _, err := io.Copy(outFile, tarReader); err != nil {
-				outFile.Close()
+				_ = outFile.Close()
 				return "", fmt.Errorf("failed to write file %s: %w", target, err)
 			}
-			outFile.Close()
+			_ = outFile.Close()
 		}
 	}
 
