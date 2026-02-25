@@ -161,10 +161,8 @@ func deployHelloWorldAndWaitForSidecar(namespace, nsLabel string) {
 	_, err := utils.Run(cmd)
 	Expect(err).NotTo(HaveOccurred())
 
-	By("waiting for namespace to be ready")
-	cmd = exec.Command("kubectl", "wait", "namespace", namespace, "--for", "condition=Ready", "--timeout=120s")
-	_, err = utils.Run(cmd)
-	Expect(err).NotTo(HaveOccurred())
+	By("waiting Istio to pick up the namespace label")
+	_, _ = utils.Run(exec.Command("sleep", "10"))
 
 	By("deploying hello-world app")
 	cmd = exec.Command("kubectl", "apply", "-f", helloWorldManifestPath(), "-n", namespace)
