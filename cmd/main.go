@@ -212,7 +212,7 @@ func main() {
 	webhookClient := webhook.NewWebhookClient(mgr.GetClient())
 	reconciler := controller.NewConfigMapReconciler(mgr.GetClient(), mgr.GetScheme(), dryRun, compareHub, restartDelay, istiodConfigReadDelay, parseSkipNamespaces(skipNamespaces), webhookClient)
 
-	builder := ctrl.NewControllerManagedBy(mgr).
+	fortsaController := ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.ConfigMap{}, builder.WithPredicates(predicate.NewPredicateFuncs(controller.ConfigMapFilter()))).
 		Watches(
 			&admissionregv1.MutatingWebhookConfiguration{},
@@ -229,9 +229,9 @@ func main() {
 			builder.WithPredicates(controller.NamespaceFilter()),
 		)
 	if reconcilePeriod > 0 {
-		builder = builder.WatchesRawSource(controller.NewPeriodicReconcileSource(reconcilePeriod))
+		fortsaController = fortsaController.WatchesRawSource(controller.NewPeriodicReconcileSource(reconcilePeriod))
 	}
-	err = builder.Complete(reconciler)
+	err = fortsaController.Complete(reconciler)
 	if err != nil {
 		setupLog.Error(err, "unable to create controller")
 		os.Exit(1)
