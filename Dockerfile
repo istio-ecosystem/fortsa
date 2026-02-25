@@ -23,9 +23,9 @@ COPY internal/ internal/
 # by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
 ARG VERSION=unknown
 ARG GIT_COMMIT=unknown
-ARG GIT_COMMIT_DATE=unknown
+ARG BUILD_TIME=unknown
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
-    -ldflags "-X main.Version=${VERSION} -X main.Commit=${GIT_COMMIT} -X main.CommitDate=${GIT_COMMIT_DATE}" \
+    -ldflags "-X main.Version=${VERSION} -X main.Commit=${GIT_COMMIT} -X main.BuildTime=${BUILD_TIME}" \
     -a -o manager cmd/main.go
 
 # Use distroless as minimal base image to package the manager binary
