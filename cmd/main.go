@@ -145,12 +145,12 @@ func main() {
 		if v == "" {
 			v = "dev"
 		}
-		fmt.Fprintf(os.Stdout, "fortsa version %s\n", v)
+		_, _ = fmt.Fprintf(os.Stdout, "fortsa version %s\n", v)
 		if Commit != "" {
-			fmt.Fprintf(os.Stdout, "  commit: %s\n", Commit)
+			_, _ = fmt.Fprintf(os.Stdout, "  commit: %s\n", Commit)
 		}
 		if CommitDate != "" {
-			fmt.Fprintf(os.Stdout, "  commit date: %s\n", CommitDate)
+			_, _ = fmt.Fprintf(os.Stdout, "  commit date: %s\n", CommitDate)
 		}
 		os.Exit(0)
 	}
