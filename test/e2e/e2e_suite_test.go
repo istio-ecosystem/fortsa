@@ -81,8 +81,15 @@ var _ = BeforeSuite(func() {
 })
 
 var _ = AfterSuite(func() {
-	// Teardown CertManager after the suite if not skipped and if it was not already installed
+	// Teardown CertManager after the suite if not skipped and if it was not already installed.
+	// Istio tests create/delete their own cluster (fortsa-e2e), which can leave kubectl context
+	// pointing at a deleted cluster. Switch back to KIND_CLUSTER (fortsa-test-e2e) where
+	// CertManager was installed before running cleanup.
 	if !skipCertManagerInstall && !isCertManagerAlreadyInstalled {
+		if cluster := os.Getenv("KIND_CLUSTER"); cluster != "" {
+			cmd := exec.Command("kubectl", "config", "use-context", "kind-"+cluster)
+			_, _ = utils.Run(cmd) // Ignore error; context may not exist if cluster was never created
+		}
 		_, _ = fmt.Fprintf(GinkgoWriter, "Uninstalling CertManager...\n")
 		utils.UninstallCertManager()
 	}
