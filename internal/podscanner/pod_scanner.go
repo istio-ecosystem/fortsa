@@ -252,7 +252,7 @@ func (s *PodScanner) ScanOutdatedPods(ctx context.Context, lastModifiedByRevisio
 	}
 
 	seen := make(map[types.NamespacedName]struct{})
-	var workloads []WorkloadRef
+	var workloads []WorkloadRef //nolint:prealloc
 
 	skipSet := make(map[string]struct{})
 	for _, ns := range opts.SkipNamespaces {
