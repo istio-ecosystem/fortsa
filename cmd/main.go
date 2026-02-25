@@ -213,8 +213,7 @@ func main() {
 	reconciler := controller.NewConfigMapReconciler(mgr.GetClient(), mgr.GetScheme(), dryRun, compareHub, restartDelay, istiodConfigReadDelay, parseSkipNamespaces(skipNamespaces), webhookClient)
 
 	builder := ctrl.NewControllerManagedBy(mgr).
-		For(&corev1.ConfigMap{}).
-		WithEventFilter(predicate.NewPredicateFuncs(controller.ConfigMapFilter())).
+		For(&corev1.ConfigMap{}, builder.WithPredicates(predicate.NewPredicateFuncs(controller.ConfigMapFilter()))).
 		Watches(
 			&admissionregv1.MutatingWebhookConfiguration{},
 			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
