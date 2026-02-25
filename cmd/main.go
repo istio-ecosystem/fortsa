@@ -20,6 +20,7 @@ import (
 	"context"
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -59,6 +60,12 @@ var (
 	setupLog = ctrl.Log.WithName("setup")
 )
 
+var (
+	Version    = "" // set at compile time with -ldflags "-X main.Version=x.y.z"
+	Commit     = "" // set at compile time with -ldflags "-X main.Commit=..."
+	CommitDate = "" // set at compile time with -ldflags "-X main.CommitDate=..."
+)
+
 // parseSkipNamespaces splits a comma-separated string into non-empty trimmed namespace names.
 func parseSkipNamespaces(s string) []string {
 	if s == "" {
@@ -96,7 +103,9 @@ func main() {
 	var webhookCertPath, webhookCertName, webhookCertKey string
 	var metricsCertPath, metricsCertName, metricsCertKey string
 	var enableHTTP2 bool
+	var showVersion bool
 	var tlsOpts []func(*tls.Config)
+	pflag.BoolVar(&showVersion, "version", false, "Print version information and exit.")
 	pflag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	pflag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	pflag.BoolVar(&enableLeaderElection, "leader-elect", true, "Enable leader election for controller manager.")
@@ -130,6 +139,21 @@ func main() {
 	zapOpts.BindFlags(flag.CommandLine)
 	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
 	pflag.Parse()
+
+	if showVersion {
+		v := Version
+		if v == "" {
+			v = "dev"
+		}
+		fmt.Fprintf(os.Stdout, "fortsa version %s\n", v)
+		if Commit != "" {
+			fmt.Fprintf(os.Stdout, "  commit: %s\n", Commit)
+		}
+		if CommitDate != "" {
+			fmt.Fprintf(os.Stdout, "  commit date: %s\n", CommitDate)
+		}
+		os.Exit(0)
+	}
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&zapOpts)))
 
