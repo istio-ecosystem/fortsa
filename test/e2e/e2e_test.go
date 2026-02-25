@@ -49,9 +49,36 @@ var _ = Describe("Manager", Ordered, func() {
 	// enforce the restricted security policy to the namespace, installing CRDs,
 	// and deploying the controller.
 	BeforeAll(func() {
+		By("deleting existing kind cluster")
+		_ = utils.KindDeleteCluster(os.Getenv("KIND_CLUSTER"))
+
+		By("creating kind cluster")
+		Expect(utils.KindCreateCluster(os.Getenv("KIND_CLUSTER"), 2*time.Minute)).To(Succeed())
+
+		// TODO(user): If you want to change the e2e test vendor from Kind, ensure the image is
+		// built and available before running the tests. Also, remove the following block.
+		By("loading the manager(Operator) image on Kind")
+		err := utils.LoadImageToKindClusterWithName(projectImage)
+		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the manager(Operator) image into Kind")
+
+		// The tests-e2e are intended to run on a temporary cluster that is created and destroyed for testing.
+		// To prevent errors when tests run in environments with CertManager already installed,
+		// we check for its presence before execution.
+		// Setup CertManager before the suite if not skipped and if not already installed
+		if !skipCertManagerInstall {
+			By("checking if cert manager is installed already")
+			isCertManagerAlreadyInstalled = utils.IsCertManagerCRDsInstalled()
+			if !isCertManagerAlreadyInstalled {
+				_, _ = fmt.Fprintf(GinkgoWriter, "Installing CertManager...\n")
+				Expect(utils.InstallCertManager()).To(Succeed(), "Failed to install CertManager")
+			} else {
+				_, _ = fmt.Fprintf(GinkgoWriter, "WARNING: CertManager is already installed. Skipping installation...\n")
+			}
+		}
+
 		By("creating manager namespace")
 		cmd := exec.Command("kubectl", "create", "ns", namespace)
-		_, err := utils.Run(cmd)
+		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to create namespace")
 
 		By("labeling the namespace to enforce the restricted security policy")
