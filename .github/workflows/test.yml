@@ -5,7 +5,7 @@ on:
 
 jobs:
   test:
-    name: Run on Ubuntu
+    name: Run tests
     runs-on: ubuntu-latest
     steps:
       - name: Clone the code
@@ -16,7 +16,12 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Running Tests
+      - name: Running Unit Tests
         run: |
           go mod tidy
           make test
+
+      - name: Running Integration Tests
+        run: |
+          go mod tidy
+          make test-integration
