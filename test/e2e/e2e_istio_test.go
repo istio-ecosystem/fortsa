@@ -17,10 +17,12 @@ limitations under the License.
 package e2e
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -114,11 +116,30 @@ func waitForFortsaRestart(namespace, deployment, initialPod string) string {
 
 func getProxyImage(namespace, podName string) string {
 	cmd := exec.Command("kubectl", "get", "pod", podName,
-		"-o", `go-template={{range .spec.containers}}{{if eq .name "istio-proxy"}}{{.image}}{{end}}{{end}}`,
+		"-o", "json",
 		"-n", namespace)
 	output, err := utils.Run(cmd)
 	Expect(err).NotTo(HaveOccurred())
-	return output
+
+	var pod struct {
+		Spec struct {
+			Containers     []struct{ Name, Image string } `json:"containers"`
+			InitContainers []struct{ Name, Image string } `json:"initContainers"`
+		} `json:"spec"`
+	}
+	Expect(json.Unmarshal([]byte(strings.TrimSpace(output)), &pod)).To(Succeed())
+
+	for _, c := range pod.Spec.Containers {
+		if c.Name == "istio-proxy" {
+			return c.Image
+		}
+	}
+	for _, c := range pod.Spec.InitContainers {
+		if c.Name == "istio-proxy" {
+			return c.Image
+		}
+	}
+	return ""
 }
 
 func setupIstioCluster(clusterName string) (tmpDir string) {
