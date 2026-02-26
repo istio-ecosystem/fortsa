@@ -1,0 +1,75 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    name: Build and Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Configure git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      - name: Compute version and release type
+        id: compute_version
+        run: |
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          COMMIT=$(git rev-parse "$TAG_NAME^{commit}")
+          BRANCHES=$(git branch -r --contains "$COMMIT" | sed 's|^[[:space:]]*origin/||' | grep -v 'HEAD')
+
+          if echo "$BRANCHES" | grep -qx 'main'; then
+            IMAGE_TAG="${TAG_NAME#v}"
+            PRERELEASE="false"
+            MAKE_LATEST="true"
+          else
+            PRERELEASE="true"
+            MAKE_LATEST="false"
+            BRANCH=$(echo "$BRANCHES" | grep -v 'main' | head -1)
+            if [ -z "$BRANCH" ]; then
+              SANITIZED="branch-unknown"
+            else
+              SANITIZED=$(echo "$BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g' | sed 's/-\+/-/g' | sed 's/^-//;s/-$//')
+            fi
+            IMAGE_TAG="${TAG_NAME#v}_${SANITIZED}"
+          fi
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "PRERELEASE=$PRERELEASE" >> $GITHUB_OUTPUT
+          echo "MAKE_LATEST=$MAKE_LATEST" >> $GITHUB_OUTPUT
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        run: |
+          make docker-buildx IMG=ghcr.io/${{ github.repository }}:${{ steps.compute_version.outputs.IMAGE_TAG }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true # always create as a draft release
+          prerelease: ${{ steps.compute_version.outputs.PRERELEASE == 'true' }}
+          make_latest: ${{ steps.compute_version.outputs.MAKE_LATEST }}
