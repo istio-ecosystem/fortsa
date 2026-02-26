@@ -21,7 +21,8 @@ TMP_CHART=$(mktemp -d)
 trap 'rm -rf "${TMP_CHART}"' EXIT
 
 # Copy chart and process Chart.yaml and values.yaml with envsubst
-cp -r "${CHART_SRC}"/* "${TMP_CHART}/"
+cp -r "${CHART_SRC}"/. "${TMP_CHART}/"
+
 # shellcheck disable=SC2016
 envsubst '${__VERSION__} ${__IMAGE_TAG_BASE__}' < "${CHART_SRC}/Chart.yaml" > "${TMP_CHART}/Chart.yaml"
 # shellcheck disable=SC2016
