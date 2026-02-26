@@ -124,3 +124,13 @@ jobs:
           make_latest: ${{ steps.compute_version.outputs.MAKE_LATEST }}
           files: |
             ./build/fortsa-helm-chart-${{ steps.compute_version.outputs.IMAGE_TAG }}.tgz
+
+      - name: Run gh-pages chart-releaser
+        uses: helm/chart-releaser-action@v1.7.0
+        with:
+          charts_dir: ./build
+          skip_packaging: true
+          skip_existing: true
+          config: .cr.yaml
+        env:
+          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
