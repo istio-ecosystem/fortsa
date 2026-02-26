@@ -85,7 +85,7 @@ jobs:
             else
               SANITIZED=$(echo "$BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g' | sed 's/-\+/-/g' | sed 's/^-//;s/-$//')
             fi
-            IMAGE_TAG="${TAG_NAME#v}_${SANITIZED}"
+            IMAGE_TAG="${TAG_NAME#v}-${SANITIZED}"
           fi
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_OUTPUT
           echo "PRERELEASE=$PRERELEASE" >> $GITHUB_OUTPUT
