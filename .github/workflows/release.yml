@@ -1,6 +1,9 @@
 name: Release
 
 on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
   workflow_dispatch:
     inputs:
       tag:
@@ -37,6 +40,7 @@ jobs:
           git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
 
       - name: Validate tag
+        if: github.event_name == 'workflow_dispatch'
         run: |
           if ! [[ "${{ inputs.tag }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
             echo "Tag must match pattern v[0-9]+.[0-9]+.[0-9]+* (e.g. v1.0.0, v2.3.4-rc1)"
@@ -44,6 +48,7 @@ jobs:
           fi
 
       - name: Create and push tag
+        if: github.event_name == 'workflow_dispatch'
         run: |
           TAG="${{ inputs.tag }}"
           if git rev-parse "refs/tags/$TAG" &>/dev/null; then
@@ -63,7 +68,7 @@ jobs:
       - name: Compute version and release type
         id: compute_version
         run: |
-          TAG_NAME="${{ inputs.tag }}"
+          TAG_NAME="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
           COMMIT=$(git rev-parse "$TAG_NAME^{commit}")
           BRANCHES=$(git branch -r --contains "$COMMIT" | sed 's|^[[:space:]]*origin/||' | grep -v 'HEAD')
 
@@ -101,7 +106,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.tag }}
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
           draft: true # always create as a draft release
           prerelease: ${{ steps.compute_version.outputs.PRERELEASE == 'true' }}
           make_latest: ${{ steps.compute_version.outputs.MAKE_LATEST }}
