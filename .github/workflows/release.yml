@@ -68,6 +68,8 @@ jobs:
       - name: Compute version and release type
         id: compute_version
         run: |
+          set -e
+          git fetch origin
           TAG_NAME="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
           COMMIT=$(git rev-parse "$TAG_NAME^{commit}")
           BRANCHES=$(git branch -r --contains "$COMMIT" | sed 's|^[[:space:]]*origin/||' | grep -v 'HEAD')
