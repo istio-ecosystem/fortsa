@@ -1,9 +1,12 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to create (e.g. v1.0.0, v2.3.4-rc1)'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -33,17 +36,34 @@ jobs:
           git config user.name "$GITHUB_ACTOR"
           git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
 
+      - name: Validate tag
+        run: |
+          if ! [[ "${{ inputs.tag }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "Tag must match pattern v[0-9]+.[0-9]+.[0-9]+* (e.g. v1.0.0, v2.3.4-rc1)"
+            exit 1
+          fi
+
+      - name: Create and push tag
+        run: |
+          TAG="${{ inputs.tag }}"
+          if git rev-parse "refs/tags/$TAG" &>/dev/null; then
+            echo "Tag $TAG already exists"
+            exit 1
+          fi
+          git tag "$TAG"
+          git push origin "$TAG"
+
       - name: Login to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-          
+
       - name: Compute version and release type
         id: compute_version
         run: |
-          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          TAG_NAME="${{ inputs.tag }}"
           COMMIT=$(git rev-parse "$TAG_NAME^{commit}")
           BRANCHES=$(git branch -r --contains "$COMMIT" | sed 's|^[[:space:]]*origin/||' | grep -v 'HEAD')
 
@@ -81,6 +101,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.tag }}
           draft: true # always create as a draft release
           prerelease: ${{ steps.compute_version.outputs.PRERELEASE == 'true' }}
           make_latest: ${{ steps.compute_version.outputs.MAKE_LATEST }}
