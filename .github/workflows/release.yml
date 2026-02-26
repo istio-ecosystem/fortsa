@@ -95,6 +95,11 @@ jobs:
         run: |
           make docker-buildx IMAGE_TAG_BASE="ghcr.io/${{ github.repository }}" VERSION="${{ steps.compute_version.outputs.IMAGE_TAG }}"
 
+      - name: Build and push helm chart
+        run: |
+          make helm-build IMAGE_TAG_BASE="ghcr.io/${{ github.repository }}" VERSION="${{ steps.compute_version.outputs.IMAGE_TAG }}"
+          helm push ./build/fortsa-${{ steps.compute_version.outputs.IMAGE_TAG }}.tgz oci://ghcr.io/${{ github.repository }}/helm
+
       # - name: Build and push OLM bundle image
       #   run: |
       #     make bundle bundle-build bundle-push IMAGE_TAG_BASE="ghcr.io/${{ github.repository }}" VERSION="${{ steps.compute_version.outputs.IMAGE_TAG }}"
@@ -103,6 +108,11 @@ jobs:
       #   run: |
       #     make catalog-build catalog-push IMAGE_TAG_BASE="ghcr.io/${{ github.repository }}" VERSION="${{ steps.compute_version.outputs.IMAGE_TAG }}"
 
+      - name: Rename Helm Chart Tarball File for Upload
+        run: mv ./build/fortsa-${{ steps.compute_version.outputs.IMAGE_TAG }}.tgz ./build/fortsa-helm-chart-${{ steps.compute_version.outputs.IMAGE_TAG }}.tgz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -110,3 +120,5 @@ jobs:
           draft: true # always create as a draft release
           prerelease: ${{ steps.compute_version.outputs.PRERELEASE == 'true' }}
           make_latest: ${{ steps.compute_version.outputs.MAKE_LATEST }}
+          files: |
+            ./build/fortsa-helm-chart-${{ steps.compute_version.outputs.IMAGE_TAG }}.tgz
