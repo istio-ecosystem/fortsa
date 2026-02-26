@@ -63,9 +63,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push image
+      - name: Build and push application image
         run: |
-          make docker-buildx IMG=ghcr.io/${{ github.repository }}:v${{ steps.compute_version.outputs.IMAGE_TAG }}
+          make docker-buildx IMG_TAG_BASE="ghcr.io/${{ github.repository }}" VERSION="${{ steps.compute_version.outputs.IMAGE_TAG }}"
+
+      # - name: Build and push OLM bundle image
+      #   run: |
+      #     make bundle bundle-build bundle-push IMG_TAG_BASE="ghcr.io/${{ github.repository }}" VERSION="${{ steps.compute_version.outputs.IMAGE_TAG }}"
+
+      # - name: Build and push OLM catalog image
+      #   run: |
+      #     make catalog-build catalog-push IMG_TAG_BASE="ghcr.io/${{ github.repository }}" VERSION="${{ steps.compute_version.outputs.IMAGE_TAG }}"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
