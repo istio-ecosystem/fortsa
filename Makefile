@@ -5,10 +5,9 @@
 # - use environment variables to overwrite this value (e.g export VERSION=0.0.2)
 # git tags should be of the format vX.Y.Z (semver-compliant)
 GIT_TAG := $(shell git describe --tags)
+VERSION ?= $(GIT_TAG:v%=%)
 GIT_COMMIT ?= $(shell if [ -n "$$(git status --porcelain 2>/dev/null)" ]; then echo "uncommitted"; else git rev-parse --short HEAD 2>/dev/null || echo "unknown"; fi)
 BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "unknown")
-
-VERSION ?= $(GIT_TAG:v%=%)
 
 # CHANNELS define the bundle channels used in the bundle.
 # Add a new line here if you would like to change its default config. (E.g CHANNELS = "candidate,fast,stable")
@@ -55,7 +54,7 @@ endif
 # This is useful for CI or a project to utilize a specific version of the operator-sdk toolkit.
 OPERATOR_SDK_VERSION ?= v1.42.0
 # Image URL to use all building/pushing image targets
-IMG ?= controller:latest
+IMG ?= $(IMAGE_TAG_BASE):v$(VERSION)
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
