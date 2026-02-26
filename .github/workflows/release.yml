@@ -65,15 +65,15 @@ jobs:
 
       - name: Build and push application image
         run: |
-          make docker-buildx IMG_TAG_BASE="ghcr.io/${{ github.repository }}" VERSION="${{ steps.compute_version.outputs.IMAGE_TAG }}"
+          make docker-buildx IMAGE_TAG_BASE="ghcr.io/${{ github.repository }}" VERSION="${{ steps.compute_version.outputs.IMAGE_TAG }}"
 
       # - name: Build and push OLM bundle image
       #   run: |
-      #     make bundle bundle-build bundle-push IMG_TAG_BASE="ghcr.io/${{ github.repository }}" VERSION="${{ steps.compute_version.outputs.IMAGE_TAG }}"
+      #     make bundle bundle-build bundle-push IMAGE_TAG_BASE="ghcr.io/${{ github.repository }}" VERSION="${{ steps.compute_version.outputs.IMAGE_TAG }}"
 
       # - name: Build and push OLM catalog image
       #   run: |
-      #     make catalog-build catalog-push IMG_TAG_BASE="ghcr.io/${{ github.repository }}" VERSION="${{ steps.compute_version.outputs.IMAGE_TAG }}"
+      #     make catalog-build catalog-push IMAGE_TAG_BASE="ghcr.io/${{ github.repository }}" VERSION="${{ steps.compute_version.outputs.IMAGE_TAG }}"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

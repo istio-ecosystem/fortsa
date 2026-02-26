@@ -7,6 +7,8 @@ jobs:
   test-e2e:
     name: Run e2e tests
     runs-on: ubuntu-latest
+    # don't run when only tags have been pushed
+    if: github.ref_type != 'tag'
     steps:
       - name: Clone the code
         uses: actions/checkout@v6
