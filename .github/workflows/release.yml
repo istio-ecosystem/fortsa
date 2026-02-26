@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
 
 permissions:
   contents: write
@@ -65,7 +65,7 @@ jobs:
 
       - name: Build and push image
         run: |
-          make docker-buildx IMG=ghcr.io/${{ github.repository }}:${{ steps.compute_version.outputs.IMAGE_TAG }}
+          make docker-buildx IMG=ghcr.io/${{ github.repository }}:v${{ steps.compute_version.outputs.IMAGE_TAG }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
