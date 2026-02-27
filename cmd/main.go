@@ -54,6 +54,7 @@ import (
 	"github.com/istio-ecosystem/fortsa/internal/controller"
 	"github.com/istio-ecosystem/fortsa/internal/mwc"
 	"github.com/istio-ecosystem/fortsa/internal/namespace"
+	"github.com/istio-ecosystem/fortsa/internal/periodic"
 	"github.com/istio-ecosystem/fortsa/internal/webhook"
 )
 
@@ -282,7 +283,7 @@ func main() {
 			builder.WithPredicates(namespace.Filter()),
 		)
 	if reconcilePeriod > 0 {
-		fortsaController = fortsaController.WatchesRawSource(controller.NewPeriodicReconcileSource(reconcilePeriod))
+		fortsaController = fortsaController.WatchesRawSource(periodic.NewReconcileSource(reconcilePeriod))
 	}
 	err = fortsaController.Complete(reconciler)
 	if err != nil {

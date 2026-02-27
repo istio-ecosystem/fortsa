@@ -24,7 +24,8 @@ fortsa/
 │   ├── cache/               # ConfigMap revision cache for change detection
 │   ├── controller/          # IstioChangeReconciler, ConfigMap predicate, reconcile routing
 │   ├── mwc/                 # MWC predicates, tag mapping fetch, reconcile request
-│   ├── namespace/           # Namespace predicates, reconcile request
+│   ├── namespace/            # Namespace predicates, reconcile request
+│   ├── periodic/            # Periodic reconcile source, reconcile request
 │   ├── podscanner/          # Pod scanning, outdated sidecar detection
 │   ├── annotator/           # Workload annotation for restarts
 │   ├── configmap/           # Istio sidecar injector ConfigMap parsing
@@ -37,9 +38,10 @@ fortsa/
 **Package dependency graph**:
 
 ```text
-controller → annotator, cache, configmap, mwc, podscanner, webhook
+controller → annotator, cache, configmap, mwc, periodic, podscanner, webhook
 mwc        → (k8s client)
 namespace  → (controller-runtime)
+periodic   → (controller-runtime)
 podscanner → configmap, webhook
 annotator  → podscanner
 ```

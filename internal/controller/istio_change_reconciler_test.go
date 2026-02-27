@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/istio-ecosystem/fortsa/internal/mwc"
+	"github.com/istio-ecosystem/fortsa/internal/periodic"
 	"github.com/istio-ecosystem/fortsa/internal/podscanner"
 )
 
@@ -52,16 +53,6 @@ func (c *countingAnnotator) getCount() int {
 	return c.count
 }
 
-func TestPeriodicReconcileRequest(t *testing.T) {
-	req := PeriodicReconcileRequest()
-	if req.Namespace != "istio-system" {
-		t.Errorf("PeriodicReconcileRequest namespace = %q, want istio-system", req.Namespace)
-	}
-	if req.Name != "__periodic_reconcile__" {
-		t.Errorf("PeriodicReconcileRequest name = %q, want __periodic_reconcile__", req.Name)
-	}
-}
-
 func TestIstioChangeReconciler_Reconcile_PeriodicTrigger(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = admissionregv1.AddToScheme(scheme)
@@ -74,7 +65,7 @@ func TestIstioChangeReconciler_Reconcile_PeriodicTrigger(t *testing.T) {
 	}
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cm).Build()
 	r := NewIstioChangeReconciler(fakeClient, scheme, false, true, 0, 0, 0, nil, nil)
-	req := PeriodicReconcileRequest()
+	req := periodic.ReconcileRequest()
 	_, err := r.Reconcile(context.Background(), req)
 	if err != nil {
 		t.Fatalf("Reconcile(periodic): %v", err)

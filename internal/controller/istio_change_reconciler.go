@@ -24,54 +24,22 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/istio-ecosystem/fortsa/internal/annotator"
 	"github.com/istio-ecosystem/fortsa/internal/cache"
 	"github.com/istio-ecosystem/fortsa/internal/configmap"
 	"github.com/istio-ecosystem/fortsa/internal/mwc"
+	"github.com/istio-ecosystem/fortsa/internal/periodic"
 	"github.com/istio-ecosystem/fortsa/internal/podscanner"
 	"github.com/istio-ecosystem/fortsa/internal/webhook"
 )
 
-// PeriodicReconcileRequest returns a reconcile.Request that triggers a full periodic reconciliation
-// of all istio-sidecar-injector ConfigMaps. Used by the periodic ticker source.
-func PeriodicReconcileRequest() ctrl.Request {
-	return ctrl.Request{
-		NamespacedName: types.NamespacedName{Namespace: istioSystemNamespace, Name: periodicReconcileTriggerName},
-	}
-}
-
-// NewPeriodicReconcileSource returns a source that enqueues a full-reconcile request at the given period.
-// When period is 0, returns nil (caller should not add the source).
-func NewPeriodicReconcileSource(period time.Duration) source.Source {
-	return source.Func(func(ctx context.Context, queue workqueue.TypedRateLimitingInterface[reconcile.Request]) error {
-		go func() {
-			ticker := time.NewTicker(period)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-					queue.Add(PeriodicReconcileRequest())
-				}
-			}
-		}()
-		return nil
-	})
-}
-
 const (
-	istioSystemNamespace         = "istio-system"
-	configMapNamePrefix          = "istio-sidecar-injector"
-	periodicReconcileTriggerName = "__periodic_reconcile__"
+	istioSystemNamespace = "istio-system"
+	configMapNamePrefix  = "istio-sidecar-injector"
 )
 
 // waitOrContextDone waits for d or until ctx is cancelled.
@@ -137,7 +105,7 @@ func (r *IstioChangeReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	logger := log.FromContext(ctx)
 
 	// Periodic reconciliation: full reconcile of all ConfigMaps (ticker-triggered only)
-	if req.Name == periodicReconcileTriggerName {
+	if req.Name == periodic.ReconcileRequestName() {
 		return r.reconcileAll(ctx)
 	}
 
