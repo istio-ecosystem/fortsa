@@ -774,7 +774,7 @@ func TestScanOutdatedPods_StatefulSetWorkload(t *testing.T) {
 	if len(workloads) != 1 {
 		t.Errorf("want 1 workload (StatefulSet), got %d", len(workloads))
 	}
-	if len(workloads) > 0 && (workloads[0].Name != "sts-1" || workloads[0].Kind != "StatefulSet") {
+	if len(workloads) > 0 && (workloads[0].Name != "sts-1" || workloads[0].Kind != "StatefulSet") { //nolint:goconst
 		t.Errorf("want sts-1 StatefulSet, got %s %s", workloads[0].Name, workloads[0].Kind)
 	}
 }
@@ -827,7 +827,7 @@ func TestScanOutdatedPods_DaemonSetWorkload(t *testing.T) {
 	if len(workloads) != 1 {
 		t.Errorf("want 1 workload (DaemonSet), got %d", len(workloads))
 	}
-	if len(workloads) > 0 && (workloads[0].Name != "ds-1" || workloads[0].Kind != "DaemonSet") {
+	if len(workloads) > 0 && (workloads[0].Name != "ds-1" || workloads[0].Kind != "DaemonSet") { //nolint:goconst
 		t.Errorf("want ds-1 DaemonSet, got %s %s", workloads[0].Name, workloads[0].Kind)
 	}
 }

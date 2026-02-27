@@ -221,6 +221,7 @@ func (s *PodScanner) processPodForOutdatedSidecar(ctx context.Context, pod *core
 		return nil
 	}
 
+	//nolint:goconst // "default" is the Istio default revision name
 	mutated, err := s.webhookCaller.CallWebhook(ctx, templatePod, revision, revOrTag == "default")
 	if err != nil {
 		logger.Error(err, "webhook call failed", "pod", pod.Namespace+"/"+pod.Name)
