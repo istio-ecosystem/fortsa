@@ -97,6 +97,7 @@ func main() {
 	var restartDelay time.Duration
 	var istiodConfigReadDelay time.Duration
 	var reconcilePeriod time.Duration
+	var annotationCooldown time.Duration
 	var skipNamespaces string
 	var probeAddr string
 	var secureMetrics bool
@@ -130,6 +131,8 @@ func main() {
 	pflag.DurationVar(&reconcilePeriod, "reconcile-period", 1*time.Hour,
 		"Period between full reconciliations of all istio-sidecar-injector ConfigMaps. "+
 			"Use 0 to disable periodic reconciliation.")
+	pflag.DurationVar(&annotationCooldown, "annotation-cooldown", 5*time.Minute,
+		"Skip re-annotating a workload if it was annotated within this duration. Use 0 to disable.")
 	pflag.StringVar(&skipNamespaces, "skip-namespaces", "kube-system,istio-system",
 		"Comma-separated list of namespaces to skip when scanning pods for outdated sidecars.")
 
@@ -258,14 +261,14 @@ func main() {
 	webhookClient := webhook.NewWebhookClient(mgr.GetClient())
 	reconciler := controller.NewConfigMapReconciler(
 		mgr.GetClient(), mgr.GetScheme(), dryRun, compareHub, restartDelay, istiodConfigReadDelay,
-		parseSkipNamespaces(skipNamespaces), webhookClient)
+		annotationCooldown, parseSkipNamespaces(skipNamespaces), webhookClient)
 
 	fortsaController := ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.ConfigMap{}, builder.WithPredicates(predicate.NewPredicateFuncs(controller.ConfigMapFilter()))).
 		Watches(
 			&admissionregv1.MutatingWebhookConfiguration{},
 			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
-				return []reconcile.Request{controller.PeriodicReconcileRequest()}
+				return []reconcile.Request{controller.MWCReconcileRequest()}
 			}),
 			builder.WithPredicates(predicate.NewPredicateFuncs(controller.MutatingWebhookFilter())),
 		).

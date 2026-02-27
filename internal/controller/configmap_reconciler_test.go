@@ -86,6 +86,16 @@ func TestPeriodicReconcileRequest(t *testing.T) {
 	}
 }
 
+func TestMWCReconcileRequest(t *testing.T) {
+	req := MWCReconcileRequest()
+	if req.Namespace != "istio-system" {
+		t.Errorf("MWCReconcileRequest namespace = %q, want istio-system", req.Namespace)
+	}
+	if req.Name != "__mwc_reconcile__" {
+		t.Errorf("MWCReconcileRequest name = %q, want __mwc_reconcile__", req.Name)
+	}
+}
+
 func TestConfigMapReconciler_Reconcile_PeriodicTrigger(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = admissionregv1.AddToScheme(scheme)
@@ -97,7 +107,7 @@ func TestConfigMapReconciler_Reconcile_PeriodicTrigger(t *testing.T) {
 		},
 	}
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cm).Build()
-	r := NewConfigMapReconciler(fakeClient, scheme, false, true, 0, 0, nil, nil)
+	r := NewConfigMapReconciler(fakeClient, scheme, false, true, 0, 0, 0, nil, nil)
 	req := PeriodicReconcileRequest()
 	_, err := r.Reconcile(context.Background(), req)
 	if err != nil {
@@ -105,6 +115,27 @@ func TestConfigMapReconciler_Reconcile_PeriodicTrigger(t *testing.T) {
 	}
 	// Periodic reconcile runs scan; with nil webhook, scanner returns no workloads
 	// Verifies reconcileAll runs without error
+}
+
+func TestConfigMapReconciler_Reconcile_MWCTrigger(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = admissionregv1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "istio-system", Name: "istio-sidecar-injector"},
+		Data: map[string]string{
+			"values": `{"revision":"default","global":{"hub":"docker.io/istio","tag":"1.20.1","proxy":{"image":"proxyv2"}}}`,
+		},
+	}
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cm).Build()
+	r := NewConfigMapReconciler(fakeClient, scheme, false, true, 0, 0, 0, nil, nil)
+	req := MWCReconcileRequest()
+	_, err := r.Reconcile(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Reconcile(MWC): %v", err)
+	}
+	// MWC reconcile runs fetchTagMappingAndScan; with nil webhook, scanner returns no workloads
+	// Verifies reconcileMWCChange runs without error
 }
 
 func TestMutatingWebhookFilter(t *testing.T) {
@@ -202,7 +233,7 @@ func TestConfigMapReconciler_lastModifiedChanged(t *testing.T) {
 	_ = corev1.AddToScheme(scheme)
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 
-	r := NewConfigMapReconciler(fakeClient, scheme, false, true, 0, 0, nil, nil)
+	r := NewConfigMapReconciler(fakeClient, scheme, false, true, 0, 0, 0, nil, nil)
 
 	t1 := time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC)
 	t2 := time.Date(2024, 1, 15, 11, 0, 0, 0, time.UTC)
@@ -232,7 +263,7 @@ func TestConfigMapReconciler_getCacheCopy(t *testing.T) {
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 
 	t1 := time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC)
-	r := NewConfigMapReconciler(fakeClient, scheme, false, true, 0, 0, nil, nil)
+	r := NewConfigMapReconciler(fakeClient, scheme, false, true, 0, 0, 0, nil, nil)
 	r.setCache("istio-system/cm", "default", t1)
 
 	copy := r.getCacheCopy()
@@ -249,7 +280,7 @@ func TestConfigMapReconciler_clearCacheByConfigMap(t *testing.T) {
 	_ = corev1.AddToScheme(scheme)
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 
-	r := NewConfigMapReconciler(fakeClient, scheme, false, true, 0, 0, nil, nil)
+	r := NewConfigMapReconciler(fakeClient, scheme, false, true, 0, 0, 0, nil, nil)
 	r.setCache("istio-system/cm", "default", time.Now())
 
 	r.clearCacheByConfigMap("istio-system/cm")

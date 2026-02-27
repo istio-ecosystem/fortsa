@@ -45,10 +45,18 @@ import (
 const istioRevisionTagPrefix = "istio-revision-tag-"
 
 // PeriodicReconcileRequest returns a reconcile.Request that triggers a full periodic reconciliation
-// of all istio-sidecar-injector ConfigMaps. Used by the periodic source.
+// of all istio-sidecar-injector ConfigMaps. Used by the periodic ticker source.
 func PeriodicReconcileRequest() ctrl.Request {
 	return ctrl.Request{
 		NamespacedName: types.NamespacedName{Namespace: istioSystemNamespace, Name: periodicReconcileTriggerName},
+	}
+}
+
+// MWCReconcileRequest returns a reconcile.Request that triggers a tag-mapping reconciliation
+// when istio-revision-tag-* MutatingWebhookConfigurations change. Used by the MWC watch.
+func MWCReconcileRequest() ctrl.Request {
+	return ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: istioSystemNamespace, Name: mwcReconcileTriggerName},
 	}
 }
 
@@ -76,6 +84,7 @@ const (
 	istioSystemNamespace         = "istio-system"
 	configMapNamePrefix          = "istio-sidecar-injector"
 	periodicReconcileTriggerName = "__periodic_reconcile__"
+	mwcReconcileTriggerName      = "__mwc_reconcile__"
 )
 
 // waitOrContextDone waits for d or until ctx is cancelled.
@@ -163,14 +172,15 @@ type ConfigMapReconciler struct {
 // NewConfigMapReconciler creates a new ConfigMapReconciler.
 // restartDelay is the delay between restarting each workload; 0 means no delay.
 // istiodConfigReadDelay is how long to wait for Istiod to read the updated ConfigMap before scanning; 0 skips the wait.
+// annotationCooldown skips re-annotating a workload if it was annotated within this duration; 0 disables the check.
 // webhookCaller is used to call the Istio injection webhook for outdated pod detection; if nil, scanning is skipped.
 // skipNamespaces lists namespaces to skip when scanning pods.
-func NewConfigMapReconciler(c client.Client, scheme *runtime.Scheme, dryRun bool, compareHub bool, restartDelay time.Duration, istiodConfigReadDelay time.Duration, skipNamespaces []string, webhookCaller webhook.WebhookCaller) *ConfigMapReconciler {
+func NewConfigMapReconciler(c client.Client, scheme *runtime.Scheme, dryRun bool, compareHub bool, restartDelay time.Duration, istiodConfigReadDelay time.Duration, annotationCooldown time.Duration, skipNamespaces []string, webhookCaller webhook.WebhookCaller) *ConfigMapReconciler {
 	return &ConfigMapReconciler{
 		Client:                c,
 		Scheme:                scheme,
 		scanner:               podscanner.NewPodScanner(c, webhookCaller),
-		annotator:             annotator.NewWorkloadAnnotator(c),
+		annotator:             annotator.NewWorkloadAnnotator(c, annotationCooldown),
 		dryRun:                dryRun,
 		compareHub:            compareHub,
 		restartDelay:          restartDelay,
@@ -185,9 +195,14 @@ func NewConfigMapReconciler(c client.Client, scheme *runtime.Scheme, dryRun bool
 func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	// Periodic reconciliation: reconcile all istio-sidecar-injector ConfigMaps regardless of change detection
+	// Periodic reconciliation: full reconcile of all ConfigMaps (ticker-triggered only)
 	if req.Name == periodicReconcileTriggerName {
 		return r.reconcileAll(ctx)
+	}
+
+	// MWC tag mapping change: re-fetch tag-to-revision and scan (no ConfigMap cache refresh)
+	if req.Name == mwcReconcileTriggerName {
+		return r.reconcileMWCChange(ctx)
 	}
 
 	// Namespace label change: scan only pods in that namespace
@@ -248,8 +263,19 @@ func (r *ConfigMapReconciler) reconcileNamespace(ctx context.Context, namespace 
 	return r.fetchTagMappingAndScan(ctx, []string{namespace})
 }
 
+// reconcileMWCChange re-fetches the tag-to-revision mapping and scans. Used when MWCs change.
+// Does not refresh the ConfigMap cache (ConfigMaps are unchanged).
+func (r *ConfigMapReconciler) reconcileMWCChange(ctx context.Context) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	logger.Info("MWC tag mapping changed, reconciling")
+	if err := r.awaitIstiodConfigReadDelay(ctx); err != nil {
+		return ctrl.Result{}, err
+	}
+	return r.fetchTagMappingAndScan(ctx, nil)
+}
+
 // reconcileAll performs a full reconciliation of all istio-sidecar-injector ConfigMaps,
-// bypassing change detection. Used for periodic reconciliation and MWC changes.
+// bypassing change detection. Used for periodic reconciliation only.
 func (r *ConfigMapReconciler) reconcileAll(ctx context.Context) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("periodic reconciliation of all istio-sidecar-injector ConfigMaps")
@@ -329,7 +355,7 @@ func (r *ConfigMapReconciler) annotateWorkloadsWithDelay(ctx context.Context, wo
 			logger.Info("[dry-run] would annotate workload for restart",
 				"workload", ref.NamespacedName,
 				"kind", ref.Kind,
-				"annotation", "fortsa.scaffidi.net/restartedAt")
+				"annotation", annotator.RestartedAtAnnotation)
 			continue
 		}
 		if err := r.annotator.Annotate(ctx, ref); err != nil {
