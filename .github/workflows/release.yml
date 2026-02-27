@@ -132,6 +132,7 @@ jobs:
 
       - name: Update chart index on gh-pages
         run: |
+          mkdir -p .cr-index
           REPO_NAME="${GITHUB_REPOSITORY#*/}"
           cr index \
             -o "${{ github.repository_owner }}" \
