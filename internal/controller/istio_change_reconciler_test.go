@@ -151,7 +151,7 @@ func TestIstioChangeReconciler_Reconcile_ConfigMapPaths(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Reconcile: %v", err)
 		}
-		if result.Requeue {
+		if result.RequeueAfter > 0 {
 			t.Error("wrong namespace should not requeue")
 		}
 	})
@@ -164,7 +164,7 @@ func TestIstioChangeReconciler_Reconcile_ConfigMapPaths(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Reconcile: %v", err)
 		}
-		if result.Requeue {
+		if result.RequeueAfter > 0 {
 			t.Error("wrong name prefix should not requeue")
 		}
 	})
@@ -207,7 +207,7 @@ func TestIstioChangeReconciler_Reconcile_ConfigMapPaths(t *testing.T) {
 		if err != nil {
 			t.Fatalf("second Reconcile: %v", err)
 		}
-		if result.Requeue {
+		if result.RequeueAfter > 0 {
 			t.Error("unchanged ConfigMap should not requeue")
 		}
 	})
