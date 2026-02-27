@@ -42,7 +42,43 @@ configuration of certain Istio-related namespace labels, annotations, and Config
 namespaces
 - Updates the objects controlling the pods to cause them to gracefully restart.
 
-<!-- TODO: insert architecture diagram here -->
+```mermaid
+flowchart TB
+    subgraph watches [Fortsa Watches]
+        ConfigMaps["ConfigMaps\nistio-sidecar-injector*"]
+        MWCs["MutatingWebhookConfigurations\nistio-revision-tag-*"]
+        Namespaces["Namespaces\nistio.io/rev, istio-injection"]
+        Periodic["Periodic Reconcile"]
+    end
+
+    subgraph fortsa [Fortsa Operator]
+        Reconciler[ConfigMapReconciler]
+        Scanner[PodScanner]
+        Annotator[WorkloadAnnotator]
+    end
+
+    subgraph k8s [Kubernetes Cluster]
+        Pods["Pods with Istio sidecar"]
+        Workloads["Deployments / DaemonSets / StatefulSets"]
+    end
+
+    subgraph istio [Istio]
+        Webhook["Istio MutatingWebhook\ninjects sidecar"]
+    end
+
+    ConfigMaps --> Reconciler
+    MWCs --> Reconciler
+    Namespaces --> Reconciler
+    Periodic --> Reconciler
+
+    Reconciler -->|"parse expected image"| Scanner
+    Scanner -->|"compare pod vs config"| Pods
+    Scanner -->|"outdated workloads"| Annotator
+    Annotator -->|"patch with restartedAt"| Workloads
+    Workloads -->|"rolling restart"| Pods
+    Pods -->|"new pod creation"| Webhook
+    Webhook -->|"inject updated sidecar"| Pods
+```
 
 When a workload pod is restarted in this way, it automatically gets re-configured with an updated
 proxy sidecar container. This works because Istio-enabled pods are mutated by Istio’s own
