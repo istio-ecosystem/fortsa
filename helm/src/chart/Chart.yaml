@@ -1,0 +1,15 @@
+apiVersion: v2
+name: fortsa
+description: A Helm chart to distribute fortsa
+type: application
+version: "${__VERSION__}"
+appVersion: "${__VERSION__}"
+keywords:
+  - kubernetes
+  - operator
+  - istio
+  - fortsa
+  - dataplane
+  - update
+annotations:
+  kubebuilder.io/generated-by: kubebuilder

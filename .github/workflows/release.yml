@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to create (e.g. v1.0.0, v2.3.4-rc1)'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -25,15 +31,46 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
       - name: Configure git
         run: |
           git config user.name "$GITHUB_ACTOR"
           git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
 
+      - name: Validate tag
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if ! [[ "${{ inputs.tag }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "Tag must match pattern v[0-9]+.[0-9]+.[0-9]+* (e.g. v1.0.0, v2.3.4-rc1)"
+            exit 1
+          fi
+
+      - name: Create and push tag
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          TAG="${{ inputs.tag }}"
+          if git rev-parse "refs/tags/$TAG" &>/dev/null; then
+            echo "Tag $TAG already exists"
+            exit 1
+          fi
+          git tag "$TAG"
+          git push origin "$TAG"
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Compute version and release type
         id: compute_version
         run: |
-          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          set -e
+          git fetch origin
+          TAG_NAME="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
           COMMIT=$(git rev-parse "$TAG_NAME^{commit}")
           BRANCHES=$(git branch -r --contains "$COMMIT" | sed 's|^[[:space:]]*origin/||' | grep -v 'HEAD')
 
@@ -50,34 +87,63 @@ jobs:
             else
               SANITIZED=$(echo "$BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g' | sed 's/-\+/-/g' | sed 's/^-//;s/-$//')
             fi
-            IMAGE_TAG="${TAG_NAME#v}_${SANITIZED}"
+            IMAGE_TAG="${TAG_NAME#v}-${SANITIZED}"
           fi
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_OUTPUT
           echo "PRERELEASE=$PRERELEASE" >> $GITHUB_OUTPUT
           echo "MAKE_LATEST=$MAKE_LATEST" >> $GITHUB_OUTPUT
 
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push helm chart
+        run: |
+          make helm-build IMAGE_TAG_BASE="ghcr.io/${{ github.repository }}" VERSION="${{ steps.compute_version.outputs.IMAGE_TAG }}"
+          helm push ./build/fortsa-${{ steps.compute_version.outputs.IMAGE_TAG }}.tgz oci://ghcr.io/${{ github.repository_owner }}/helm
 
       - name: Build and push application image
+        if: false
         run: |
           make docker-buildx IMAGE_TAG_BASE="ghcr.io/${{ github.repository }}" VERSION="${{ steps.compute_version.outputs.IMAGE_TAG }}"
 
-      # - name: Build and push OLM bundle image
-      #   run: |
-      #     make bundle bundle-build bundle-push IMAGE_TAG_BASE="ghcr.io/${{ github.repository }}" VERSION="${{ steps.compute_version.outputs.IMAGE_TAG }}"
+      - name: Install chart-releaser
+        run: |
+          CR_VERSION="v1.8.1"
+          ARCH=$(uname -m)
+          case "$ARCH" in
+            x86_64) CR_ARCH="linux_amd64" ;;
+            aarch64|arm64) CR_ARCH="linux_arm64" ;;
+            *) echo "Unsupported arch: $ARCH"; exit 1 ;;
+          esac
+          curl -sSLo cr.tar.gz "https://github.com/helm/chart-releaser/releases/download/${CR_VERSION}/chart-releaser_${CR_VERSION#v}_${CR_ARCH}.tar.gz"
+          tar -xzf cr.tar.gz -C /usr/local/bin
+          rm cr.tar.gz
+          cr version
 
-      # - name: Build and push OLM catalog image
-      #   run: |
-      #     make catalog-build catalog-push IMAGE_TAG_BASE="ghcr.io/${{ github.repository }}" VERSION="${{ steps.compute_version.outputs.IMAGE_TAG }}"
+      - name: Upload chart to GitHub Release
+        run: |
+          REPO_NAME="${GITHUB_REPOSITORY#*/}"
+          cr upload \
+            -o "${{ github.repository_owner }}" \
+            -r "$REPO_NAME" \
+            --config .cr.yaml \
+            --release-name-template "{{ .Version }}" \
+            --skip-existing \
+            --make-release-latest=${{ steps.compute_version.outputs.MAKE_LATEST }}
+        env:
+          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          draft: true # always create as a draft release
-          prerelease: ${{ steps.compute_version.outputs.PRERELEASE == 'true' }}
-          make_latest: ${{ steps.compute_version.outputs.MAKE_LATEST }}
+      - name: Update chart index on gh-pages
+        run: |
+          mkdir -p .cr-index
+          REPO_NAME="${GITHUB_REPOSITORY#*/}"
+          cr index \
+            -o "${{ github.repository_owner }}" \
+            -r "$REPO_NAME" \
+            --config .cr.yaml \
+            --release-name-template "{{ .Version }}" \
+            --push
+        env:
+          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Set release to draft
+        run: gh release edit "${{ steps.compute_version.outputs.IMAGE_TAG }}" --draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
