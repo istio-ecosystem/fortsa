@@ -13,7 +13,7 @@ jobs:
   test-e2e:
     name: Run e2e tests (comment '/test-e2e' to trigger)
     runs-on: ubuntu-latest
-    if: contains(github.event.comment.body, '/test-e2e')
+    if: github.event.issue.pull_request && contains(github.event.comment.body, '/test-e2e')
     steps:
       - name: Get PR branch
         uses: xt0rted/pull-request-comment-branch@v3
