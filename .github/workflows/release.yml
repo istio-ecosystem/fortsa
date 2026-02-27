@@ -97,24 +97,11 @@ jobs:
         run: |
           make helm-build IMAGE_TAG_BASE="ghcr.io/${{ github.repository }}" VERSION="${{ steps.compute_version.outputs.IMAGE_TAG }}"
           helm push ./build/fortsa-${{ steps.compute_version.outputs.IMAGE_TAG }}.tgz oci://ghcr.io/${{ github.repository_owner }}/helm
-      - name: Rename Helm Chart Tarball File for Upload
-        run: mv ./build/fortsa-${{ steps.compute_version.outputs.IMAGE_TAG }}.tgz ./build/fortsa-helm-chart-${{ steps.compute_version.outputs.IMAGE_TAG }}.tgz
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push application image
+        if: false
         run: |
           make docker-buildx IMAGE_TAG_BASE="ghcr.io/${{ github.repository }}" VERSION="${{ steps.compute_version.outputs.IMAGE_TAG }}"
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.compute_version.outputs.IMAGE_TAG }}
-          draft: true # always create as a draft release
-          prerelease: ${{ steps.compute_version.outputs.PRERELEASE == 'true' }}
-          make_latest: ${{ steps.compute_version.outputs.MAKE_LATEST }}
-          files: |
-            ./build/fortsa-helm-chart-${{ steps.compute_version.outputs.IMAGE_TAG }}.tgz
 
       - name: Install chart-releaser
         run: |
@@ -130,6 +117,19 @@ jobs:
           rm cr.tar.gz
           cr version
 
+      - name: Upload chart to GitHub Release
+        run: |
+          REPO_NAME="${GITHUB_REPOSITORY#*/}"
+          cr upload \
+            -o "${{ github.repository_owner }}" \
+            -r "$REPO_NAME" \
+            --config .cr.yaml \
+            --release-name-template "{{ .Version }}" \
+            --skip-existing \
+            --make-release-latest=${{ steps.compute_version.outputs.MAKE_LATEST }}
+        env:
+          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+
       - name: Update chart index on gh-pages
         run: |
           REPO_NAME="${GITHUB_REPOSITORY#*/}"
@@ -141,3 +141,8 @@ jobs:
             --push
         env:
           CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Set release to draft
+        run: gh release edit "${{ steps.compute_version.outputs.IMAGE_TAG }}" --draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
