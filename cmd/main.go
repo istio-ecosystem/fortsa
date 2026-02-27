@@ -262,9 +262,17 @@ func main() {
 	}
 
 	webhookClient := webhook.NewWebhookClient(mgr.GetClient())
-	reconciler := controller.NewIstioChangeReconciler(
-		mgr.GetClient(), mgr.GetScheme(), dryRun, compareHub, restartDelay, istiodConfigReadDelay,
-		annotationCooldown, parseSkipNamespaces(skipNamespaces), webhookClient)
+	reconciler := controller.NewIstioChangeReconciler(controller.ReconcilerOptions{
+		Client:                mgr.GetClient(),
+		Scheme:                mgr.GetScheme(),
+		DryRun:                dryRun,
+		CompareHub:            compareHub,
+		RestartDelay:          restartDelay,
+		IstiodConfigReadDelay: istiodConfigReadDelay,
+		AnnotationCooldown:    annotationCooldown,
+		SkipNamespaces:        parseSkipNamespaces(skipNamespaces),
+		WebhookCaller:         webhookClient,
+	})
 
 	fortsaController := ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.ConfigMap{}, builder.WithPredicates(predicate.NewPredicateFuncs(controller.ConfigMapFilter()))).

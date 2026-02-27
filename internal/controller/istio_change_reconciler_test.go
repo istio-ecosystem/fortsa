@@ -64,7 +64,12 @@ func TestIstioChangeReconciler_Reconcile_PeriodicTrigger(t *testing.T) {
 		},
 	}
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cm).Build()
-	r := NewIstioChangeReconciler(fakeClient, scheme, false, true, 0, 0, 0, nil, nil)
+	r := NewIstioChangeReconciler(ReconcilerOptions{
+		Client:     fakeClient,
+		Scheme:     scheme,
+		DryRun:     false,
+		CompareHub: true,
+	})
 	req := periodic.ReconcileRequest()
 	_, err := r.Reconcile(context.Background(), req)
 	if err != nil {
@@ -85,7 +90,12 @@ func TestIstioChangeReconciler_Reconcile_MWCTrigger(t *testing.T) {
 		},
 	}
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cm).Build()
-	r := NewIstioChangeReconciler(fakeClient, scheme, false, true, 0, 0, 0, nil, nil)
+	r := NewIstioChangeReconciler(ReconcilerOptions{
+		Client:     fakeClient,
+		Scheme:     scheme,
+		DryRun:     false,
+		CompareHub: true,
+	})
 	req := mwc.ReconcileRequest()
 	_, err := r.Reconcile(context.Background(), req)
 	if err != nil {
