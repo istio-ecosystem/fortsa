@@ -37,6 +37,25 @@ entries:
   - annotations:
       kubebuilder.io/generated-by: kubebuilder
     apiVersion: v2
+    appVersion: 0.0.0-test17-fortsa2-helm-3
+    created: "2026-02-27T03:09:14.714014871Z"
+    description: A Helm chart to distribute fortsa
+    digest: be593d34fc7057511d0e4afa29fb58cd6a671fcd427890b9d22805f312f187eb
+    keywords:
+    - kubernetes
+    - operator
+    - istio
+    - fortsa
+    - dataplane
+    - update
+    name: fortsa
+    type: application
+    urls:
+    - https://github.com/istio-ecosystem/fortsa/releases/download/0.0.0-test17-fortsa2-helm-3/fortsa-0.0.0-test17-fortsa2-helm-3.tgz
+    version: 0.0.0-test17-fortsa2-helm-3
+  - annotations:
+      kubebuilder.io/generated-by: kubebuilder
+    apiVersion: v2
     appVersion: 0.0.0-test10-fortsa2-helm-3
     created: "2026-02-26T22:52:55.073469899Z"
     description: A Helm chart to distribute fortsa
@@ -267,4 +286,4 @@ entries:
     urls:
     - https://github.com/hercynium/istio-fortsa/releases/download/v0.0.18/istio-fortsa-helm-chart-v0.0.18.tgz
     version: v0.0.18
-generated: "2026-02-26T22:52:55.073541062Z"
+generated: "2026-02-27T03:09:14.714089541Z"
