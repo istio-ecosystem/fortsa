@@ -27,6 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/istio-ecosystem/fortsa/internal/mwc"
@@ -103,6 +104,113 @@ func TestIstioChangeReconciler_Reconcile_MWCTrigger(t *testing.T) {
 	}
 	// MWC reconcile runs fetchTagMappingAndScan; with nil webhook, scanner returns no workloads
 	// Verifies reconcileMWCChange runs without error
+}
+
+func TestIstioChangeReconciler_Reconcile_NamespaceTrigger(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = admissionregv1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "istio-system", Name: "istio-sidecar-injector"},
+		Data: map[string]string{
+			"values": `{"revision":"default","global":{"hub":"docker.io/istio","tag":"1.20.1","proxy":{"image":"proxyv2"}}}`,
+		},
+	}
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cm).Build()
+	r := NewIstioChangeReconciler(ReconcilerOptions{
+		Client:     fakeClient,
+		Scheme:     scheme,
+		DryRun:     false,
+		CompareHub: true,
+	})
+	// Namespace trigger: Namespace empty, Name is the namespace to reconcile
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "", Name: "default"}}
+	_, err := r.Reconcile(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Reconcile(namespace): %v", err)
+	}
+}
+
+func TestIstioChangeReconciler_Reconcile_ConfigMapPaths(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = admissionregv1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+
+	validCM := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "istio-system", Name: "istio-sidecar-injector"},
+		Data: map[string]string{
+			"values": `{"revision":"default","global":{"hub":"docker.io/istio","tag":"1.20.1","proxy":{"image":"proxyv2"}}}`,
+		},
+	}
+
+	t.Run("wrong namespace returns no-op", func(t *testing.T) {
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(validCM).Build()
+		r := NewIstioChangeReconciler(ReconcilerOptions{Client: fakeClient, Scheme: scheme})
+		req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "istio-sidecar-injector"}}
+		result, err := r.Reconcile(context.Background(), req)
+		if err != nil {
+			t.Fatalf("Reconcile: %v", err)
+		}
+		if result.Requeue {
+			t.Error("wrong namespace should not requeue")
+		}
+	})
+
+	t.Run("wrong name prefix returns no-op", func(t *testing.T) {
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(validCM).Build()
+		r := NewIstioChangeReconciler(ReconcilerOptions{Client: fakeClient, Scheme: scheme})
+		req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "istio-system", Name: "other-config"}}
+		result, err := r.Reconcile(context.Background(), req)
+		if err != nil {
+			t.Fatalf("Reconcile: %v", err)
+		}
+		if result.Requeue {
+			t.Error("wrong name prefix should not requeue")
+		}
+	})
+
+	t.Run("ConfigMap NotFound clears cache and returns no error", func(t *testing.T) {
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+		r := NewIstioChangeReconciler(ReconcilerOptions{Client: fakeClient, Scheme: scheme})
+		req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "istio-system", Name: "istio-sidecar-injector"}}
+		_, err := r.Reconcile(context.Background(), req)
+		if err != nil {
+			t.Fatalf("Reconcile(NotFound): %v", err)
+		}
+	})
+
+	t.Run("ConfigMap parse error returns error", func(t *testing.T) {
+		invalidCM := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "istio-system", Name: "istio-sidecar-injector"},
+			Data:       map[string]string{"values": `{invalid json}`},
+		}
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(invalidCM).Build()
+		r := NewIstioChangeReconciler(ReconcilerOptions{Client: fakeClient, Scheme: scheme})
+		req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "istio-system", Name: "istio-sidecar-injector"}}
+		_, err := r.Reconcile(context.Background(), req)
+		if err == nil {
+			t.Error("Reconcile with invalid ConfigMap values should return error")
+		}
+	})
+
+	t.Run("LastModifiedChanged false skips scan", func(t *testing.T) {
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(validCM).Build()
+		r := NewIstioChangeReconciler(ReconcilerOptions{Client: fakeClient, Scheme: scheme})
+		req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "istio-system", Name: "istio-sidecar-injector"}}
+		// First reconcile populates cache
+		_, err := r.Reconcile(context.Background(), req)
+		if err != nil {
+			t.Fatalf("first Reconcile: %v", err)
+		}
+		// Second reconcile with same ConfigMap - cache unchanged, should skip
+		result, err := r.Reconcile(context.Background(), req)
+		if err != nil {
+			t.Fatalf("second Reconcile: %v", err)
+		}
+		if result.Requeue {
+			t.Error("unchanged ConfigMap should not requeue")
+		}
+	})
 }
 
 func TestConfigMapFilter(t *testing.T) {

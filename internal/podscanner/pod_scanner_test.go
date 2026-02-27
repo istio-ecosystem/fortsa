@@ -625,6 +625,213 @@ func TestScanOutdatedPods_skipNamespaces(t *testing.T) {
 	})
 }
 
+func TestScanOutdatedPods_limitToNamespaces(t *testing.T) {
+	t.Run("LimitToNamespaces with multiple namespaces scans both", func(t *testing.T) {
+		scheme := runtime.NewScheme()
+		_ = corev1.AddToScheme(scheme)
+		_ = appsv1.AddToScheme(scheme)
+
+		fakeClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(
+				&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "ns1", Labels: map[string]string{"istio-injection": "enabled"}}},
+				&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "ns2", Labels: map[string]string{"istio-injection": "enabled"}}},
+				&appsv1.Deployment{
+					ObjectMeta: metav1.ObjectMeta{Name: "dep-ns1", Namespace: "ns1"},
+					Spec: appsv1.DeploymentSpec{
+						Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "a"}},
+						Template: corev1.PodTemplateSpec{
+							ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "a"}},
+							Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx"}}},
+						},
+					},
+				},
+				&appsv1.ReplicaSet{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "rs-ns1",
+						Namespace: "ns1",
+						OwnerReferences: []metav1.OwnerReference{
+							{Kind: "Deployment", Name: "dep-ns1", Controller: ptr(true)},
+						},
+					},
+				},
+				&corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "pod-ns1",
+						Namespace: "ns1",
+						OwnerReferences: []metav1.OwnerReference{
+							{Kind: "ReplicaSet", Name: "rs-ns1", Controller: ptr(true)},
+						},
+					},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{Name: istioProxyContainerName, Image: "docker.io/istio/proxyv2:1.19.0"},
+						},
+					},
+				},
+				&appsv1.Deployment{
+					ObjectMeta: metav1.ObjectMeta{Name: "dep-ns2", Namespace: "ns2"},
+					Spec: appsv1.DeploymentSpec{
+						Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "b"}},
+						Template: corev1.PodTemplateSpec{
+							ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "b"}},
+							Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx"}}},
+						},
+					},
+				},
+				&appsv1.ReplicaSet{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "rs-ns2",
+						Namespace: "ns2",
+						OwnerReferences: []metav1.OwnerReference{
+							{Kind: "Deployment", Name: "dep-ns2", Controller: ptr(true)},
+						},
+					},
+				},
+				&corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "pod-ns2",
+						Namespace: "ns2",
+						OwnerReferences: []metav1.OwnerReference{
+							{Kind: "ReplicaSet", Name: "rs-ns2", Controller: ptr(true)},
+						},
+					},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{Name: istioProxyContainerName, Image: "docker.io/istio/proxyv2:1.19.0"},
+						},
+					},
+				},
+			).
+			Build()
+
+		webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
+		scanner := NewPodScanner(fakeClient, webhook)
+		workloads, err := scanner.ScanOutdatedPods(context.Background(), map[string]time.Time{}, map[string]string{}, map[string]time.Time{}, ScanOptions{
+			LimitToNamespaces: []string{"ns1", "ns2"},
+		})
+		if err != nil {
+			t.Fatalf("ScanOutdatedPods: %v", err)
+		}
+		if len(workloads) != 2 {
+			t.Errorf("want 2 workloads (ns1 and ns2), got %d", len(workloads))
+		}
+		names := make(map[string]bool)
+		for _, w := range workloads {
+			names[w.Name] = true
+		}
+		if !names["dep-ns1"] || !names["dep-ns2"] {
+			t.Errorf("want dep-ns1 and dep-ns2, got %v", workloads)
+		}
+	})
+}
+
+func TestScanOutdatedPods_StatefulSetWorkload(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = appsv1.AddToScheme(scheme)
+
+	sts := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "sts-1", Namespace: "default"},
+		Spec: appsv1.StatefulSetSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "test"}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "test", "istio.io/rev": "default"}},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx"}}},
+			},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(
+			&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default", Labels: map[string]string{"istio-injection": "enabled"}}},
+			sts,
+			&corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "sts-1-0",
+					Namespace: "default",
+					OwnerReferences: []metav1.OwnerReference{
+						{Kind: "StatefulSet", Name: "sts-1", Controller: ptr(true)},
+					},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: istioProxyContainerName, Image: "docker.io/istio/proxyv2:1.19.0"},
+						{Name: "app", Image: "nginx"},
+					},
+				},
+			},
+		).
+		Build()
+
+	webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
+	scanner := NewPodScanner(fakeClient, webhook)
+	workloads, err := scanner.ScanOutdatedPods(context.Background(), map[string]time.Time{}, map[string]string{}, map[string]time.Time{}, ScanOptions{})
+	if err != nil {
+		t.Fatalf("ScanOutdatedPods: %v", err)
+	}
+	if len(workloads) != 1 {
+		t.Errorf("want 1 workload (StatefulSet), got %d", len(workloads))
+	}
+	if len(workloads) > 0 && (workloads[0].Name != "sts-1" || workloads[0].Kind != "StatefulSet") {
+		t.Errorf("want sts-1 StatefulSet, got %s %s", workloads[0].Name, workloads[0].Kind)
+	}
+}
+
+func TestScanOutdatedPods_DaemonSetWorkload(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = appsv1.AddToScheme(scheme)
+
+	ds := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "ds-1", Namespace: "default"},
+		Spec: appsv1.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "test"}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "test", "istio.io/rev": "default"}},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx"}}},
+			},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(
+			&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default", Labels: map[string]string{"istio-injection": "enabled"}}},
+			ds,
+			&corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "ds-1-xyz",
+					Namespace: "default",
+					OwnerReferences: []metav1.OwnerReference{
+						{Kind: "DaemonSet", Name: "ds-1", Controller: ptr(true)},
+					},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: istioProxyContainerName, Image: "docker.io/istio/proxyv2:1.19.0"},
+						{Name: "app", Image: "nginx"},
+					},
+				},
+			},
+		).
+		Build()
+
+	webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
+	scanner := NewPodScanner(fakeClient, webhook)
+	workloads, err := scanner.ScanOutdatedPods(context.Background(), map[string]time.Time{}, map[string]string{}, map[string]time.Time{}, ScanOptions{})
+	if err != nil {
+		t.Fatalf("ScanOutdatedPods: %v", err)
+	}
+	if len(workloads) != 1 {
+		t.Errorf("want 1 workload (DaemonSet), got %d", len(workloads))
+	}
+	if len(workloads) > 0 && (workloads[0].Name != "ds-1" || workloads[0].Kind != "DaemonSet") {
+		t.Errorf("want ds-1 DaemonSet, got %s %s", workloads[0].Name, workloads[0].Kind)
+	}
+}
+
 func ptr(b bool) *bool { return &b }
 
 // recordingWebhookCaller records the revision passed to CallWebhook.

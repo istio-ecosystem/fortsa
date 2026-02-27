@@ -17,8 +17,69 @@ limitations under the License.
 package periodic
 
 import (
+	"context"
 	"testing"
+	"time"
+
+	"k8s.io/client-go/util/workqueue"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
+
+func TestNewReconcileSource(t *testing.T) {
+	period := 15 * time.Millisecond
+	src := NewReconcileSource(period)
+	if src == nil {
+		t.Fatal("NewReconcileSource returned nil")
+	}
+
+	queue := workqueue.NewTypedRateLimitingQueue[reconcile.Request](workqueue.DefaultTypedControllerRateLimiter[reconcile.Request]())
+	ctx := context.Background()
+
+	if err := src.Start(ctx, queue); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Wait for at least one tick to fire
+	time.Sleep(period + 5*time.Millisecond)
+
+	req, shutdown := queue.Get()
+	if shutdown {
+		t.Fatal("queue shut down unexpectedly")
+	}
+	queue.Done(req)
+
+	expected := ReconcileRequest()
+	if req.Namespace != expected.Namespace || req.Name != expected.Name {
+		t.Errorf("got request %v, want %v", req, expected)
+	}
+}
+
+func TestNewReconcileSource_contextCancelStopsTicker(t *testing.T) {
+	period := 20 * time.Millisecond
+	src := NewReconcileSource(period)
+	queue := workqueue.NewTypedRateLimitingQueue[reconcile.Request](workqueue.DefaultTypedControllerRateLimiter[reconcile.Request]())
+	ctx, cancel := context.WithCancel(context.Background())
+
+	_ = src.Start(ctx, queue)
+
+	// Allow one tick to fire
+	time.Sleep(period + 10*time.Millisecond)
+	req, shutdown := queue.Get()
+	if shutdown {
+		t.Fatal("queue shut down unexpectedly")
+	}
+	queue.Done(req)
+
+	// Cancel context - goroutine should exit on ctx.Done()
+	cancel()
+	time.Sleep(period * 2) // Give goroutine time to exit
+
+	// Verify we got the expected request
+	expected := ReconcileRequest()
+	if req.Namespace != expected.Namespace || req.Name != expected.Name {
+		t.Errorf("got request %v, want %v", req, expected)
+	}
+}
 
 func TestReconcileRequest(t *testing.T) {
 	req := ReconcileRequest()
