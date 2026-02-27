@@ -143,3 +143,194 @@ func TestWorkloadAnnotator_Annotate_cooldownSkipsReannotation(t *testing.T) {
 		t.Errorf("cooldown should skip re-annotation: restartedAt changed from %q to %q", firstValue, secondValue)
 	}
 }
+
+func TestWorkloadAnnotator_Annotate_StatefulSet(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = appsv1.AddToScheme(scheme)
+
+	sts := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-sts", Namespace: "default"},
+		Spec: appsv1.StatefulSetSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "test"}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "test"}},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx"}}},
+			},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(sts).
+		Build()
+
+	a := NewWorkloadAnnotator(fakeClient, 0)
+	ref := podscanner.WorkloadRef{
+		NamespacedName: types.NamespacedName{Namespace: sts.Namespace, Name: sts.Name},
+		Kind:           "StatefulSet",
+	}
+
+	annotated, err := a.Annotate(context.Background(), ref)
+	if err != nil {
+		t.Fatalf("Annotate: %v", err)
+	}
+	if !annotated {
+		t.Error("Annotate: want true (patch applied), got false")
+	}
+
+	var updated appsv1.StatefulSet
+	if err := fakeClient.Get(context.Background(), ref.NamespacedName, &updated); err != nil {
+		t.Fatalf("Get StatefulSet: %v", err)
+	}
+	if _, ok := updated.Spec.Template.Annotations[RestartedAtAnnotation]; !ok {
+		t.Error("expected fortsa.scaffidi.net/restartedAt annotation")
+	}
+}
+
+func TestWorkloadAnnotator_Annotate_DaemonSet(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = appsv1.AddToScheme(scheme)
+
+	ds := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-ds", Namespace: "default"},
+		Spec: appsv1.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "test"}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "test"}},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx"}}},
+			},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(ds).
+		Build()
+
+	a := NewWorkloadAnnotator(fakeClient, 0)
+	ref := podscanner.WorkloadRef{
+		NamespacedName: types.NamespacedName{Namespace: ds.Namespace, Name: ds.Name},
+		Kind:           "DaemonSet",
+	}
+
+	annotated, err := a.Annotate(context.Background(), ref)
+	if err != nil {
+		t.Fatalf("Annotate: %v", err)
+	}
+	if !annotated {
+		t.Error("Annotate: want true (patch applied), got false")
+	}
+
+	var updated appsv1.DaemonSet
+	if err := fakeClient.Get(context.Background(), ref.NamespacedName, &updated); err != nil {
+		t.Fatalf("Get DaemonSet: %v", err)
+	}
+	if _, ok := updated.Spec.Template.Annotations[RestartedAtAnnotation]; !ok {
+		t.Error("expected fortsa.scaffidi.net/restartedAt annotation")
+	}
+}
+
+func TestWorkloadAnnotator_Annotate_unsupportedKind(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = appsv1.AddToScheme(scheme)
+
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+	a := NewWorkloadAnnotator(fakeClient, 0)
+	ref := podscanner.WorkloadRef{
+		NamespacedName: types.NamespacedName{Namespace: "default", Name: "cronjob-1"},
+		Kind:           "CronJob",
+	}
+
+	annotated, err := a.Annotate(context.Background(), ref)
+	if err != nil {
+		t.Fatalf("Annotate: %v", err)
+	}
+	if annotated {
+		t.Error("Annotate with unsupported kind: want false, got true")
+	}
+}
+
+func TestWorkloadAnnotator_getRestartedAt_cooldownWithStatefulSet(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = appsv1.AddToScheme(scheme)
+
+	sts := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-sts", Namespace: "default"},
+		Spec: appsv1.StatefulSetSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "test"}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "test"}},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx"}}},
+			},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(sts).
+		Build()
+
+	a := NewWorkloadAnnotator(fakeClient, 5*time.Minute)
+	ref := podscanner.WorkloadRef{
+		NamespacedName: types.NamespacedName{Namespace: sts.Namespace, Name: sts.Name},
+		Kind:           "StatefulSet",
+	}
+
+	annotated, err := a.Annotate(context.Background(), ref)
+	if err != nil {
+		t.Fatalf("first Annotate: %v", err)
+	}
+	if !annotated {
+		t.Error("first Annotate: want true, got false")
+	}
+
+	annotated, err = a.Annotate(context.Background(), ref)
+	if err != nil {
+		t.Fatalf("second Annotate: %v", err)
+	}
+	if annotated {
+		t.Error("second Annotate within cooldown: want false (skipped), got true")
+	}
+}
+
+func TestWorkloadAnnotator_getRestartedAt_unparseableTimestamp(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = appsv1.AddToScheme(scheme)
+
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-dep", Namespace: "default"},
+		Spec: appsv1.DeploymentSpec{
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{RestartedAtAnnotation: "not-a-valid-timestamp"},
+				},
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx"}}},
+			},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(dep).
+		Build()
+
+	a := NewWorkloadAnnotator(fakeClient, 5*time.Minute)
+	ref := podscanner.WorkloadRef{
+		NamespacedName: types.NamespacedName{Namespace: dep.Namespace, Name: dep.Name},
+		Kind:           "Deployment",
+	}
+
+	// Unparseable timestamp: getRestartedAt returns zero, so we don't skip - we annotate
+	annotated, err := a.Annotate(context.Background(), ref)
+	if err != nil {
+		t.Fatalf("Annotate: %v", err)
+	}
+	if !annotated {
+		t.Error("Annotate with unparseable restartedAt: want true (treat as no annotation), got false")
+	}
+}

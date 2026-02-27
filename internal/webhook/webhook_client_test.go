@@ -18,8 +18,13 @@ package webhook
 
 import (
 	"context"
+	"encoding/json"
+	"encoding/pem"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	admissionv1 "k8s.io/api/admission/v1"
 	admissionregv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -183,6 +188,267 @@ func TestGetWebhookURLAndCABundle_PreferDefaultTag(t *testing.T) {
 			t.Errorf("url = %v, want https://istiod.istio-system.svc:443/inject", url)
 		}
 	})
+}
+
+func TestTransportForCABundle(t *testing.T) {
+	t.Run("invalid PEM returns error", func(t *testing.T) {
+		_, err := transportForCABundle([]byte("not-valid-pem"))
+		if err == nil {
+			t.Error("transportForCABundle with invalid PEM should return error")
+		}
+	})
+
+	t.Run("valid PEM returns transport", func(t *testing.T) {
+		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+		defer server.Close()
+		cert := server.Certificate()
+		certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})
+		transport, err := transportForCABundle(certPEM)
+		if err != nil {
+			t.Fatalf("transportForCABundle: %v", err)
+		}
+		if transport == nil {
+			t.Error("transport should not be nil")
+		}
+	})
+}
+
+func TestApplyJSONPatch(t *testing.T) {
+	original := []byte(`{"spec":{"containers":[{"name":"app","image":"nginx"}]}}`)
+	patch := []byte(`[{"op":"add","path":"/spec/containers/-","value":{"name":"istio-proxy","image":"istio/proxyv2:1.20.1"}}]`)
+	patched, err := applyJSONPatch(original, patch)
+	if err != nil {
+		t.Fatalf("applyJSONPatch: %v", err)
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(patched, &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	containers, _ := result["spec"].(map[string]interface{})["containers"].([]interface{})
+	if len(containers) != 2 {
+		t.Errorf("want 2 containers after patch, got %d", len(containers))
+	}
+
+	t.Run("invalid patch returns error", func(t *testing.T) {
+		_, err := applyJSONPatch(original, []byte(`[{"op":"invalid"}]`))
+		if err == nil {
+			t.Error("applyJSONPatch with invalid patch should return error")
+		}
+	})
+}
+
+func TestCallWebhook(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = admissionregv1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+
+	t.Run("success with JSON patch", func(t *testing.T) {
+		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var review admissionv1.AdmissionReview
+			if err := json.NewDecoder(r.Body).Decode(&review); err != nil {
+				t.Errorf("decode request: %v", err)
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			// Return a patch that adds istio-proxy container
+			patch := []byte(`[{"op":"add","path":"/spec/containers/-","value":{"name":"istio-proxy","image":"docker.io/istio/proxyv2:1.20.1"}}]`)
+			resp := &admissionv1.AdmissionReview{
+				TypeMeta: review.TypeMeta,
+				Response: &admissionv1.AdmissionResponse{
+					UID:     review.Request.UID,
+					Allowed: true,
+					Patch:   patch,
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
+		}))
+		defer server.Close()
+
+		certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
+		urlStr := server.URL
+		mwc := &admissionregv1.MutatingWebhookConfiguration{
+			ObjectMeta: metav1.ObjectMeta{Name: defaultTagWebhookConfigName},
+			Webhooks: []admissionregv1.MutatingWebhook{
+				{
+					ClientConfig: admissionregv1.WebhookClientConfig{
+						URL:      &urlStr,
+						CABundle: certPEM,
+					},
+				},
+			},
+		}
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(mwc).Build()
+		wc := NewWebhookClient(fakeClient)
+
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{{Name: "app", Image: "nginx"}},
+			},
+		}
+
+		mutated, err := wc.CallWebhook(context.Background(), pod, "default", true)
+		if err != nil {
+			t.Fatalf("CallWebhook: %v", err)
+		}
+		if mutated == nil {
+			t.Fatal("mutated pod should not be nil")
+		}
+		found := false
+		for _, c := range mutated.Spec.Containers {
+			if c.Name == "istio-proxy" && c.Image == "docker.io/istio/proxyv2:1.20.1" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Error("expected istio-proxy container in mutated pod")
+		}
+	})
+
+	t.Run("success with no patch returns original pod", func(t *testing.T) {
+		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var review admissionv1.AdmissionReview
+			_ = json.NewDecoder(r.Body).Decode(&review)
+			resp := &admissionv1.AdmissionReview{
+				TypeMeta: review.TypeMeta,
+				Response: &admissionv1.AdmissionResponse{
+					UID:     review.Request.UID,
+					Allowed: true,
+					Patch:   nil,
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
+		}))
+		defer server.Close()
+
+		certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
+		urlStr := server.URL
+		mwc := &admissionregv1.MutatingWebhookConfiguration{
+			ObjectMeta: metav1.ObjectMeta{Name: defaultTagWebhookConfigName},
+			Webhooks: []admissionregv1.MutatingWebhook{
+				{
+					ClientConfig: admissionregv1.WebhookClientConfig{
+						URL:      &urlStr,
+						CABundle: certPEM,
+					},
+				},
+			},
+		}
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(mwc).Build()
+		wc := NewWebhookClient(fakeClient)
+
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx"}}},
+		}
+
+		mutated, err := wc.CallWebhook(context.Background(), pod, "default", true)
+		if err != nil {
+			t.Fatalf("CallWebhook: %v", err)
+		}
+		if mutated.Name != pod.Name || mutated.Namespace != pod.Namespace {
+			t.Errorf("no patch should return original pod, got %s/%s", mutated.Namespace, mutated.Name)
+		}
+	})
+
+	t.Run("denied response returns error", func(t *testing.T) {
+		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var review admissionv1.AdmissionReview
+			_ = json.NewDecoder(r.Body).Decode(&review)
+			resp := &admissionv1.AdmissionReview{
+				TypeMeta: review.TypeMeta,
+				Response: &admissionv1.AdmissionResponse{
+					UID:     review.Request.UID,
+					Allowed: false,
+					Result:  &metav1.Status{Message: "denied for testing"},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
+		}))
+		defer server.Close()
+
+		certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
+		urlStr := server.URL
+		mwc := &admissionregv1.MutatingWebhookConfiguration{
+			ObjectMeta: metav1.ObjectMeta{Name: defaultTagWebhookConfigName},
+			Webhooks: []admissionregv1.MutatingWebhook{
+				{
+					ClientConfig: admissionregv1.WebhookClientConfig{
+						URL:      &urlStr,
+						CABundle: certPEM,
+					},
+				},
+			},
+		}
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(mwc).Build()
+		wc := NewWebhookClient(fakeClient)
+
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx"}}},
+		}
+
+		_, err := wc.CallWebhook(context.Background(), pod, "default", true)
+		if err == nil {
+			t.Error("CallWebhook with denied response should return error")
+		}
+	})
+
+	t.Run("non-200 status returns error", func(t *testing.T) {
+		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+		defer server.Close()
+
+		certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
+		urlStr := server.URL
+		mwc := &admissionregv1.MutatingWebhookConfiguration{
+			ObjectMeta: metav1.ObjectMeta{Name: defaultTagWebhookConfigName},
+			Webhooks: []admissionregv1.MutatingWebhook{
+				{
+					ClientConfig: admissionregv1.WebhookClientConfig{
+						URL:      &urlStr,
+						CABundle: certPEM,
+					},
+				},
+			},
+		}
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(mwc).Build()
+		wc := NewWebhookClient(fakeClient)
+
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx"}}},
+		}
+
+		_, err := wc.CallWebhook(context.Background(), pod, "default", true)
+		if err == nil {
+			t.Error("CallWebhook with 500 status should return error")
+		}
+	})
+}
+
+func TestGetWebhookURL(t *testing.T) {
+	tests := []struct {
+		revision string
+		want     string
+	}{
+		{"default", "https://istiod.istio-system.svc:443/inject"},
+		{"", "https://istiod.istio-system.svc:443/inject"},
+		{"canary", "https://istiod-canary.istio-system.svc:443/inject"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.revision, func(t *testing.T) {
+			got := getWebhookURL(tt.revision)
+			if got != tt.want {
+				t.Errorf("getWebhookURL(%q) = %q, want %q", tt.revision, got, tt.want)
+			}
+		})
+	}
 }
 
 func ptrStr(s string) *string { return &s }
