@@ -1,0 +1,50 @@
+name: E2E Tests (comment '/test-e2e' to trigger)
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  test-e2e:
+    name: Run e2e tests (comment '/test-e2e' to trigger)
+    runs-on: ubuntu-latest
+    if: github.event.issue.pull_request && contains(github.event.comment.body, '/test-e2e')
+    steps:
+      - name: Get PR branch
+        uses: xt0rted/pull-request-comment-branch@v3
+        id: pr-branch
+
+      - name: Clone the code
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.pr-branch.outputs.head_ref }}
+          fetch-tags: true
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Install the latest version of kind
+        run: |
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+
+      - name: Verify kind installation
+        run: kind version
+      
+      # we want to pre-create the manager image to avoid the opaque build step in the tests 
+      - name: Run docker build to pre-create the manager image
+        run: |
+          make docker-build
+          
+      - name: Running Test e2e
+        run: |
+          go mod tidy
+          make test-e2e

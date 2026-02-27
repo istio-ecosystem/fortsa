@@ -7,6 +7,7 @@ linters:
     - copyloopvar
     - dupl
     - errcheck
+    - ginkgolinter
     - goconst
     - gocyclo
     - govet
@@ -15,10 +16,16 @@ linters:
     - misspell
     - nakedret
     - prealloc
+    - revive
     - staticcheck
     - unconvert
     - unparam
     - unused
+  settings:
+    revive:
+      rules:
+        - name: comment-spacings
+        - name: import-shadowing
   exclusions:
     generated: lax
     rules:
