@@ -62,6 +62,19 @@ func (r *IstioChangeReconciler) awaitIstiodConfigReadDelay(ctx context.Context) 
 	return waitOrContextDone(ctx, r.istiodConfigReadDelay)
 }
 
+// ReconcilerOptions holds configuration for NewIstioChangeReconciler.
+type ReconcilerOptions struct {
+	Client                client.Client
+	Scheme                *runtime.Scheme
+	DryRun                bool
+	CompareHub            bool
+	RestartDelay          time.Duration
+	IstiodConfigReadDelay time.Duration
+	AnnotationCooldown    time.Duration
+	SkipNamespaces        []string
+	WebhookCaller         webhook.WebhookCaller
+}
+
 // IstioChangeReconciler reconciles Istio sidecar injector ConfigMaps and related changes
 // (MWC tag mapping, namespace labels).
 type IstioChangeReconciler struct {
@@ -79,23 +92,18 @@ type IstioChangeReconciler struct {
 	revisionCache *cache.RevisionCache
 }
 
-// NewIstioChangeReconciler creates a new IstioChangeReconciler.
-// restartDelay is the delay between restarting each workload; 0 means no delay.
-// istiodConfigReadDelay is how long to wait for Istiod to read the updated ConfigMap before scanning; 0 skips the wait.
-// annotationCooldown skips re-annotating a workload if it was annotated within this duration; 0 disables the check.
-// webhookCaller is used to call the Istio injection webhook for outdated pod detection; if nil, scanning is skipped.
-// skipNamespaces lists namespaces to skip when scanning pods.
-func NewIstioChangeReconciler(c client.Client, scheme *runtime.Scheme, dryRun bool, compareHub bool, restartDelay time.Duration, istiodConfigReadDelay time.Duration, annotationCooldown time.Duration, skipNamespaces []string, webhookCaller webhook.WebhookCaller) *IstioChangeReconciler {
+// NewIstioChangeReconciler creates a new IstioChangeReconciler from the given options.
+func NewIstioChangeReconciler(opts ReconcilerOptions) *IstioChangeReconciler {
 	return &IstioChangeReconciler{
-		Client:                c,
-		Scheme:                scheme,
-		scanner:               podscanner.NewPodScanner(c, webhookCaller),
-		annotator:             annotator.NewWorkloadAnnotator(c, annotationCooldown),
-		dryRun:                dryRun,
-		compareHub:            compareHub,
-		restartDelay:          restartDelay,
-		istiodConfigReadDelay: istiodConfigReadDelay,
-		skipNamespaces:        skipNamespaces,
+		Client:                opts.Client,
+		Scheme:                opts.Scheme,
+		scanner:               podscanner.NewPodScanner(opts.Client, opts.WebhookCaller),
+		annotator:             annotator.NewWorkloadAnnotator(opts.Client, opts.AnnotationCooldown),
+		dryRun:                opts.DryRun,
+		compareHub:            opts.CompareHub,
+		restartDelay:          opts.RestartDelay,
+		istiodConfigReadDelay: opts.IstiodConfigReadDelay,
+		skipNamespaces:        opts.SkipNamespaces,
 		revisionCache:         cache.NewRevisionCache(),
 	}
 }

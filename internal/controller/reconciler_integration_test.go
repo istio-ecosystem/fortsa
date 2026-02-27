@@ -74,7 +74,12 @@ func TestReconcilerIntegration(t *testing.T) {
 	}
 
 	// nil webhook: integration test has no Istio webhook; scanner returns no workloads
-	reconciler := NewIstioChangeReconciler(mgr.GetClient(), mgr.GetScheme(), true, true, 0, 0, 0, nil, nil)
+	reconciler := NewIstioChangeReconciler(ReconcilerOptions{
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		DryRun:     true,
+		CompareHub: true,
+	})
 	err = ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.ConfigMap{}, builder.WithPredicates(predicate.NewPredicateFuncs(ConfigMapFilter()))).
 		Watches(
