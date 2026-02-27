@@ -93,15 +93,14 @@ jobs:
           echo "PRERELEASE=$PRERELEASE" >> $GITHUB_OUTPUT
           echo "MAKE_LATEST=$MAKE_LATEST" >> $GITHUB_OUTPUT
 
+      - name: Build and push application image
+        run: |
+          make docker-buildx IMAGE_TAG_BASE="ghcr.io/${{ github.repository }}" VERSION="${{ steps.compute_version.outputs.IMAGE_TAG }}"
+
       - name: Build and push helm chart
         run: |
           make helm-build IMAGE_TAG_BASE="ghcr.io/${{ github.repository }}" VERSION="${{ steps.compute_version.outputs.IMAGE_TAG }}"
           helm push ./build/fortsa-${{ steps.compute_version.outputs.IMAGE_TAG }}.tgz oci://ghcr.io/${{ github.repository_owner }}/helm
-
-      - name: Build and push application image
-        if: false
-        run: |
-          make docker-buildx IMAGE_TAG_BASE="ghcr.io/${{ github.repository }}" VERSION="${{ steps.compute_version.outputs.IMAGE_TAG }}"
 
       - name: Install chart-releaser
         run: |
