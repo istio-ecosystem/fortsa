@@ -57,8 +57,12 @@ func TestWorkloadAnnotator_Annotate(t *testing.T) {
 		Kind:           "Deployment",
 	}
 
-	if err := annotator.Annotate(context.Background(), ref); err != nil {
+	annotated, err := annotator.Annotate(context.Background(), ref)
+	if err != nil {
 		t.Fatalf("Annotate: %v", err)
+	}
+	if !annotated {
+		t.Error("Annotate: want true (patch applied), got false")
 	}
 
 	var updated appsv1.Deployment
@@ -104,8 +108,12 @@ func TestWorkloadAnnotator_Annotate_cooldownSkipsReannotation(t *testing.T) {
 	}
 
 	// First annotate
-	if err := annotator.Annotate(context.Background(), ref); err != nil {
+	annotated, err := annotator.Annotate(context.Background(), ref)
+	if err != nil {
 		t.Fatalf("first Annotate: %v", err)
+	}
+	if !annotated {
+		t.Error("first Annotate: want true (patch applied), got false")
 	}
 
 	var afterFirst appsv1.Deployment
@@ -117,9 +125,13 @@ func TestWorkloadAnnotator_Annotate_cooldownSkipsReannotation(t *testing.T) {
 		t.Fatal("expected restartedAt after first annotate")
 	}
 
-	// Second annotate immediately (within cooldown) - should no-op
-	if err := annotator.Annotate(context.Background(), ref); err != nil {
+	// Second annotate immediately (within cooldown) - should no-op, return (false, nil)
+	annotated, err = annotator.Annotate(context.Background(), ref)
+	if err != nil {
 		t.Fatalf("second Annotate: %v", err)
+	}
+	if annotated {
+		t.Error("second Annotate: want false (skipped due to cooldown), got true")
 	}
 
 	var afterSecond appsv1.Deployment

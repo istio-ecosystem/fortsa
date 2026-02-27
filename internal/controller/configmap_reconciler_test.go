@@ -38,11 +38,11 @@ type countingAnnotator struct {
 	count int
 }
 
-func (c *countingAnnotator) Annotate(_ context.Context, _ podscanner.WorkloadRef) error {
+func (c *countingAnnotator) Annotate(_ context.Context, _ podscanner.WorkloadRef) (bool, error) {
 	c.mu.Lock()
 	c.count++
 	c.mu.Unlock()
-	return nil
+	return true, nil
 }
 
 func (c *countingAnnotator) getCount() int {

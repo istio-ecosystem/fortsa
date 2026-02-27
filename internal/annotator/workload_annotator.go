@@ -36,7 +36,7 @@ const (
 
 // WorkloadAnnotator annotates workloads to trigger restarts.
 type WorkloadAnnotator interface {
-	Annotate(ctx context.Context, ref podscanner.WorkloadRef) error
+	Annotate(ctx context.Context, ref podscanner.WorkloadRef) (annotated bool, err error)
 }
 
 // WorkloadAnnotatorImpl adds the restartedAt annotation to workload pod templates.
@@ -54,14 +54,15 @@ func NewWorkloadAnnotator(c client.Client, annotationCooldown time.Duration) *Wo
 // Annotate adds fortsa.scaffidi.net/restartedAt to the workload's pod template
 // spec.template.metadata.annotations, triggering a rolling restart.
 // When annotationCooldown is set, skips re-annotating if the workload was annotated within that duration.
-func (a *WorkloadAnnotatorImpl) Annotate(ctx context.Context, ref podscanner.WorkloadRef) error {
+// Returns (true, nil) when a patch was applied, (false, nil) when skipped or unsupported kind, (false, err) on error.
+func (a *WorkloadAnnotatorImpl) Annotate(ctx context.Context, ref podscanner.WorkloadRef) (bool, error) {
 	if a.annotationCooldown > 0 {
 		annotatedAt, err := a.getRestartedAt(ctx, ref)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if !annotatedAt.IsZero() && time.Since(annotatedAt) < a.annotationCooldown {
-			return nil // skip: already annotated recently
+			return false, nil // skip: already annotated recently
 		}
 	}
 
@@ -79,24 +80,27 @@ func (a *WorkloadAnnotatorImpl) Annotate(ctx context.Context, ref podscanner.Wor
 	}
 	patchBytes, err := json.Marshal(patch)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	switch ref.Kind {
 	case "Deployment":
-		return a.client.Patch(ctx, &appsv1.Deployment{
+		err := a.client.Patch(ctx, &appsv1.Deployment{
 			ObjectMeta: metav1.ObjectMeta{Namespace: ref.Namespace, Name: ref.Name},
 		}, client.RawPatch(types.MergePatchType, patchBytes))
+		return err == nil, err
 	case "StatefulSet":
-		return a.client.Patch(ctx, &appsv1.StatefulSet{
+		err := a.client.Patch(ctx, &appsv1.StatefulSet{
 			ObjectMeta: metav1.ObjectMeta{Namespace: ref.Namespace, Name: ref.Name},
 		}, client.RawPatch(types.MergePatchType, patchBytes))
+		return err == nil, err
 	case "DaemonSet":
-		return a.client.Patch(ctx, &appsv1.DaemonSet{
+		err := a.client.Patch(ctx, &appsv1.DaemonSet{
 			ObjectMeta: metav1.ObjectMeta{Namespace: ref.Namespace, Name: ref.Name},
 		}, client.RawPatch(types.MergePatchType, patchBytes))
+		return err == nil, err
 	default:
-		return nil
+		return false, nil
 	}
 }
 

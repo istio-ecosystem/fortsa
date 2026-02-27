@@ -358,11 +358,14 @@ func (r *ConfigMapReconciler) annotateWorkloadsWithDelay(ctx context.Context, wo
 				"annotation", annotator.RestartedAtAnnotation)
 			continue
 		}
-		if err := r.annotator.Annotate(ctx, ref); err != nil {
+		annotated, err := r.annotator.Annotate(ctx, ref)
+		if err != nil {
 			logger.Error(err, "failed to annotate workload", "workload", ref.NamespacedName, "kind", ref.Kind)
 			continue
 		}
-		logger.Info("annotated workload for restart", "workload", ref.NamespacedName, "kind", ref.Kind)
+		if annotated {
+			logger.Info("annotated workload for restart", "workload", ref.NamespacedName, "kind", ref.Kind)
+		}
 	}
 }
 
