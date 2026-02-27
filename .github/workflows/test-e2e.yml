@@ -1,18 +1,28 @@
-name: E2E Tests
+name: E2E Tests (comment '/test-e2e' to trigger)
 
 on:
-  push:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
 
 jobs:
   test-e2e:
-    name: Run e2e tests
+    name: Run e2e tests (comment '/test-e2e' to trigger)
     runs-on: ubuntu-latest
-    # don't run when only tags have been pushed
-    if: github.ref_type != 'tag'
+    if: github.event.issue.pull_request && contains(github.event.comment.body, '/test-e2e')
     steps:
+      - name: Get PR branch
+        uses: xt0rted/pull-request-comment-branch@v3
+        id: pr-branch
+
       - name: Clone the code
         uses: actions/checkout@v6
         with:
+          ref: ${{ steps.pr-branch.outputs.head_ref }}
           fetch-tags: true
 
       - name: Setup Go
