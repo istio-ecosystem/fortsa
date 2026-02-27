@@ -52,6 +52,9 @@ import (
 	// +kubebuilder:scaffold:imports
 
 	"github.com/istio-ecosystem/fortsa/internal/controller"
+	"github.com/istio-ecosystem/fortsa/internal/mwc"
+	"github.com/istio-ecosystem/fortsa/internal/namespace"
+	"github.com/istio-ecosystem/fortsa/internal/periodic"
 	"github.com/istio-ecosystem/fortsa/internal/webhook"
 )
 
@@ -259,7 +262,7 @@ func main() {
 	}
 
 	webhookClient := webhook.NewWebhookClient(mgr.GetClient())
-	reconciler := controller.NewConfigMapReconciler(
+	reconciler := controller.NewIstioChangeReconciler(
 		mgr.GetClient(), mgr.GetScheme(), dryRun, compareHub, restartDelay, istiodConfigReadDelay,
 		annotationCooldown, parseSkipNamespaces(skipNamespaces), webhookClient)
 
@@ -268,19 +271,19 @@ func main() {
 		Watches(
 			&admissionregv1.MutatingWebhookConfiguration{},
 			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
-				return []reconcile.Request{controller.MWCReconcileRequest()}
+				return []reconcile.Request{mwc.ReconcileRequest()}
 			}),
-			builder.WithPredicates(predicate.NewPredicateFuncs(controller.MutatingWebhookFilter())),
+			builder.WithPredicates(predicate.NewPredicateFuncs(mwc.Filter())),
 		).
 		Watches(
 			&corev1.Namespace{},
 			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
-				return []reconcile.Request{controller.NamespaceReconcileRequest(obj.GetName())}
+				return []reconcile.Request{namespace.ReconcileRequest(obj.GetName())}
 			}),
-			builder.WithPredicates(controller.NamespaceFilter()),
+			builder.WithPredicates(namespace.Filter()),
 		)
 	if reconcilePeriod > 0 {
-		fortsaController = fortsaController.WatchesRawSource(controller.NewPeriodicReconcileSource(reconcilePeriod))
+		fortsaController = fortsaController.WatchesRawSource(periodic.NewReconcileSource(reconcilePeriod))
 	}
 	err = fortsaController.Complete(reconciler)
 	if err != nil {

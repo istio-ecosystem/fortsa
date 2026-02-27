@@ -21,7 +21,11 @@ This document describes how Fortsa works internally: its components, data flows,
 fortsa/
 ├── cmd/main.go              # Entry point, flag parsing, manager setup
 ├── internal/
-│   ├── controller/          # ConfigMapReconciler, predicates, reconcile routing
+│   ├── cache/               # ConfigMap revision cache for change detection
+│   ├── controller/          # IstioChangeReconciler, ConfigMap predicate, reconcile routing
+│   ├── mwc/                 # MWC predicates, tag mapping fetch, reconcile request
+│   ├── namespace/            # Namespace predicates, reconcile request
+│   ├── periodic/            # Periodic reconcile source, reconcile request
 │   ├── podscanner/          # Pod scanning, outdated sidecar detection
 │   ├── annotator/           # Workload annotation for restarts
 │   ├── configmap/           # Istio sidecar injector ConfigMap parsing
@@ -34,7 +38,10 @@ fortsa/
 **Package dependency graph**:
 
 ```text
-controller → annotator, configmap, podscanner, webhook
+controller → annotator, cache, configmap, mwc, periodic, podscanner, webhook
+mwc        → (k8s client)
+namespace  → (controller-runtime)
+periodic   → (controller-runtime)
 podscanner → configmap, webhook
 annotator  → podscanner
 ```
@@ -51,7 +58,7 @@ flowchart TB
     end
 
     subgraph fortsa [Fortsa Operator]
-        Reconciler[ConfigMapReconciler]
+        Reconciler[IstioChangeReconciler]
         Scanner[PodScanner]
         Annotator[WorkloadAnnotator]
         WebhookClient[WebhookClient]
@@ -89,14 +96,14 @@ The application starts in [cmd/main.go](cmd/main.go) with the following sequence
 1. **Parse flags**: `--dry-run`, `--compare-hub`, `--restart-delay`, `--istiod-config-read-delay`, `--reconcile-period`, `--annotation-cooldown`, `--skip-namespaces`, TLS paths for webhook and metrics
 2. **Register scheme**: `clientgoscheme` and `corev1` for Kubernetes API types
 3. **Create Manager**: controller-runtime Manager with leader election (`71f32f9d.fortsa.scaffidi.net`), metrics on `:8080`, health probes on `:8081`
-4. **Instantiate components**: `WebhookClient` and `ConfigMapReconciler` (which creates `PodScanner` and `WorkloadAnnotator` internally)
+4. **Instantiate components**: `WebhookClient` and `IstioChangeReconciler` (which creates `PodScanner` and `WorkloadAnnotator` internally)
 5. **Build controller**: `For(ConfigMap)` with `ConfigMapFilter`, plus `Watches` for MutatingWebhookConfiguration, Namespace, and optional periodic source
 6. **Add health checks**: `healthz.Ping` for healthz and readyz
 7. **Start manager**: `mgr.Start(ctrl.SetupSignalHandler())`
 
 ## Reconcile Flow
 
-The `Reconcile` method in [internal/controller/configmap_reconciler.go](internal/controller/configmap_reconciler.go) routes requests by type:
+The `Reconcile` method in [internal/controller/istio_change_reconciler.go](internal/controller/istio_change_reconciler.go) routes requests by type:
 
 ```mermaid
 flowchart TD
@@ -216,10 +223,10 @@ flowchart TD
 
 ## Cache and Change Detection
 
-The ConfigMapReconciler maintains an in-memory cache for change detection and pod skip logic:
+The [internal/cache](internal/cache) package provides `RevisionCache`, used by `IstioChangeReconciler` for change detection and pod skip logic:
 
-- **cache**: `revision → LastModified` — Used to detect ConfigMap changes and to skip pods created after the config was updated (with IstiodConfigReadDelay)
+- **revisionToLastModified**: `revision → LastModified` — Used to detect ConfigMap changes and to skip pods created after the config was updated (with IstiodConfigReadDelay)
 - **nameToRevision**: `configMapKey → revision` — Used when a ConfigMap is deleted to clean up the cache
-- **lastModifiedChanged()**: Returns true only when the ConfigMap's LastModified differs from the cached value; avoids redundant scans when the same ConfigMap is reconciled again without changes
+- **LastModifiedChanged()**: Returns true only when the ConfigMap's LastModified differs from the cached value; avoids redundant scans when the same ConfigMap is reconciled again without changes
 
-The cache is protected by `cacheMu` for concurrent access from multiple reconcile workers.
+The cache is protected by a mutex for concurrent access from multiple reconcile workers.

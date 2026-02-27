@@ -52,7 +52,7 @@ flowchart TB
     end
 
     subgraph fortsa [Fortsa Operator]
-        Reconciler[ConfigMapReconciler]
+        Reconciler[IstioChangeReconciler]
         Scanner[PodScanner]
         Annotator[WorkloadAnnotator]
     end
@@ -99,8 +99,9 @@ Fortsa currently has no CRDs and there are no plans to introduce any.
 Fortsa is written in Go, and compiles to a single binary that is deployed via a bare container with
 only the binary (FROM scratch, in Docker parlance)
 
-Fortsa does not require access to anything outside the cluster, not access to any applications other
-than the k8s API. It does not listen on any ports except for liveness/readiness checks and metrics.
+Fortsa does not require access to anything outside the cluster, nor access to any applications other
+than the k8s API and `istiod`. It does not listen on any ports except for liveness/readiness checks
+and metrics.
 
 ## Getting Started
 
@@ -252,8 +253,6 @@ More information can be found via the [Kubebuilder Documentation](https://book.k
 ## License
 
 ```text
-Copyright 2026.
-
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
