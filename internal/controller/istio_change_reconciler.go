@@ -19,10 +19,8 @@ package controller
 import (
 	"context"
 	"strings"
-	"sync"
 	"time"
 
-	admissionregv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -30,33 +28,23 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/istio-ecosystem/fortsa/internal/annotator"
+	"github.com/istio-ecosystem/fortsa/internal/cache"
 	"github.com/istio-ecosystem/fortsa/internal/configmap"
+	"github.com/istio-ecosystem/fortsa/internal/mwc"
 	"github.com/istio-ecosystem/fortsa/internal/podscanner"
 	"github.com/istio-ecosystem/fortsa/internal/webhook"
 )
-
-const istioRevisionTagPrefix = "istio-revision-tag-"
 
 // PeriodicReconcileRequest returns a reconcile.Request that triggers a full periodic reconciliation
 // of all istio-sidecar-injector ConfigMaps. Used by the periodic ticker source.
 func PeriodicReconcileRequest() ctrl.Request {
 	return ctrl.Request{
 		NamespacedName: types.NamespacedName{Namespace: istioSystemNamespace, Name: periodicReconcileTriggerName},
-	}
-}
-
-// MWCReconcileRequest returns a reconcile.Request that triggers a tag-mapping reconciliation
-// when istio-revision-tag-* MutatingWebhookConfigurations change. Used by the MWC watch.
-func MWCReconcileRequest() ctrl.Request {
-	return ctrl.Request{
-		NamespacedName: types.NamespacedName{Namespace: istioSystemNamespace, Name: mwcReconcileTriggerName},
 	}
 }
 
@@ -84,7 +72,6 @@ const (
 	istioSystemNamespace         = "istio-system"
 	configMapNamePrefix          = "istio-sidecar-injector"
 	periodicReconcileTriggerName = "__periodic_reconcile__"
-	mwcReconcileTriggerName      = "__mwc_reconcile__"
 )
 
 // waitOrContextDone waits for d or until ctx is cancelled.
@@ -100,57 +87,16 @@ func waitOrContextDone(ctx context.Context, d time.Duration) error {
 
 // awaitIstiodConfigReadDelay waits for Istiod to read updated config before scanning.
 // No-op if istiodConfigReadDelay is 0.
-func (r *ConfigMapReconciler) awaitIstiodConfigReadDelay(ctx context.Context) error {
+func (r *IstioChangeReconciler) awaitIstiodConfigReadDelay(ctx context.Context) error {
 	if r.istiodConfigReadDelay <= 0 {
 		return nil
 	}
 	return waitOrContextDone(ctx, r.istiodConfigReadDelay)
 }
 
-// fetchTagToRevision lists istio-revision-tag-* MutatingWebhookConfigurations and builds
-// a tag-to-revision map from istio.io/tag and istio.io/rev labels.
-func fetchTagToRevision(ctx context.Context, c client.Client) (map[string]string, error) {
-	tagToRevision, _, err := fetchTagToRevisionAndLastModified(ctx, c)
-	return tagToRevision, err
-}
-
-// fetchTagToRevisionAndLastModified lists istio-revision-tag-* MutatingWebhookConfigurations,
-// builds tag-to-revision map and tag-to-lastModified map (for pod skip logic).
-func fetchTagToRevisionAndLastModified(ctx context.Context, c client.Client) (map[string]string, map[string]time.Time, error) {
-	var mwcList admissionregv1.MutatingWebhookConfigurationList
-	if err := c.List(ctx, &mwcList); err != nil {
-		return nil, nil, err
-	}
-	tagToRevision := make(map[string]string)
-	lastModifiedByTag := make(map[string]time.Time)
-	for i := range mwcList.Items {
-		mwc := &mwcList.Items[i]
-		if !strings.HasPrefix(mwc.Name, istioRevisionTagPrefix) {
-			continue
-		}
-		tag := mwc.Labels["istio.io/tag"]
-		revision := mwc.Labels["istio.io/rev"]
-		if tag != "" && revision != "" {
-			tagToRevision[tag] = revision
-			lastModifiedByTag[tag] = getMWCLastModified(mwc)
-		}
-	}
-	return tagToRevision, lastModifiedByTag, nil
-}
-
-// getMWCLastModified returns the latest modification time of the MutatingWebhookConfiguration.
-func getMWCLastModified(mwc *admissionregv1.MutatingWebhookConfiguration) time.Time {
-	latest := mwc.CreationTimestamp.Time
-	for _, mf := range mwc.ManagedFields {
-		if mf.Time != nil && mf.Time.After(latest) {
-			latest = mf.Time.Time
-		}
-	}
-	return latest
-}
-
-// ConfigMapReconciler reconciles Istio sidecar injector ConfigMaps.
-type ConfigMapReconciler struct {
+// IstioChangeReconciler reconciles Istio sidecar injector ConfigMaps and related changes
+// (MWC tag mapping, namespace labels).
+type IstioChangeReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 
@@ -162,21 +108,17 @@ type ConfigMapReconciler struct {
 	istiodConfigReadDelay time.Duration
 	skipNamespaces        []string
 
-	// cache stores ConfigMap LastModified by revision for change detection and pod skip logic.
-	cache map[string]time.Time
-	// nameToRevision maps ConfigMap namespace/name to revision for delete cleanup.
-	nameToRevision map[string]string
-	cacheMu        sync.RWMutex
+	revisionCache *cache.RevisionCache
 }
 
-// NewConfigMapReconciler creates a new ConfigMapReconciler.
+// NewIstioChangeReconciler creates a new IstioChangeReconciler.
 // restartDelay is the delay between restarting each workload; 0 means no delay.
 // istiodConfigReadDelay is how long to wait for Istiod to read the updated ConfigMap before scanning; 0 skips the wait.
 // annotationCooldown skips re-annotating a workload if it was annotated within this duration; 0 disables the check.
 // webhookCaller is used to call the Istio injection webhook for outdated pod detection; if nil, scanning is skipped.
 // skipNamespaces lists namespaces to skip when scanning pods.
-func NewConfigMapReconciler(c client.Client, scheme *runtime.Scheme, dryRun bool, compareHub bool, restartDelay time.Duration, istiodConfigReadDelay time.Duration, annotationCooldown time.Duration, skipNamespaces []string, webhookCaller webhook.WebhookCaller) *ConfigMapReconciler {
-	return &ConfigMapReconciler{
+func NewIstioChangeReconciler(c client.Client, scheme *runtime.Scheme, dryRun bool, compareHub bool, restartDelay time.Duration, istiodConfigReadDelay time.Duration, annotationCooldown time.Duration, skipNamespaces []string, webhookCaller webhook.WebhookCaller) *IstioChangeReconciler {
+	return &IstioChangeReconciler{
 		Client:                c,
 		Scheme:                scheme,
 		scanner:               podscanner.NewPodScanner(c, webhookCaller),
@@ -186,13 +128,12 @@ func NewConfigMapReconciler(c client.Client, scheme *runtime.Scheme, dryRun bool
 		restartDelay:          restartDelay,
 		istiodConfigReadDelay: istiodConfigReadDelay,
 		skipNamespaces:        skipNamespaces,
-		cache:                 make(map[string]time.Time),
-		nameToRevision:        make(map[string]string),
+		revisionCache:         cache.NewRevisionCache(),
 	}
 }
 
 // Reconcile implements the reconcile loop for ConfigMap events.
-func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *IstioChangeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	// Periodic reconciliation: full reconcile of all ConfigMaps (ticker-triggered only)
@@ -201,7 +142,7 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// MWC tag mapping change: re-fetch tag-to-revision and scan (no ConfigMap cache refresh)
-	if req.Name == mwcReconcileTriggerName {
+	if req.Name == mwc.ReconcileRequestName() {
 		return r.reconcileMWCChange(ctx)
 	}
 
@@ -225,7 +166,7 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	var cm corev1.ConfigMap
 	if err := r.Get(ctx, req.NamespacedName, &cm); err != nil {
 		if errors.IsNotFound(err) {
-			r.clearCacheByConfigMap(req.String())
+			r.revisionCache.ClearByConfigMap(req.String())
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
@@ -239,10 +180,10 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	lastModified := configmap.GetConfigMapLastModified(&cm)
 	revision := vals.Revision
 
-	if !r.lastModifiedChanged(revision, lastModified) {
+	if !r.revisionCache.LastModifiedChanged(revision, lastModified) {
 		return ctrl.Result{}, nil
 	}
-	r.setCache(req.String(), revision, lastModified)
+	r.revisionCache.Set(req.String(), revision, lastModified)
 
 	// Wait for Istiod to read the updated ConfigMap before scanning (webhook uses Istiod's config)
 	// TODO: This is a hack... We should find a better mechanism.
@@ -254,7 +195,7 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 }
 
 // reconcileNamespace performs a namespace-scoped reconciliation when Istio labels change on a namespace.
-func (r *ConfigMapReconciler) reconcileNamespace(ctx context.Context, namespace string) (ctrl.Result, error) {
+func (r *IstioChangeReconciler) reconcileNamespace(ctx context.Context, namespace string) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("reconciling namespace (Istio label change)", "namespace", namespace)
 	if err := r.awaitIstiodConfigReadDelay(ctx); err != nil {
@@ -265,7 +206,7 @@ func (r *ConfigMapReconciler) reconcileNamespace(ctx context.Context, namespace 
 
 // reconcileMWCChange re-fetches the tag-to-revision mapping and scans. Used when MWCs change.
 // Does not refresh the ConfigMap cache (ConfigMaps are unchanged).
-func (r *ConfigMapReconciler) reconcileMWCChange(ctx context.Context) (ctrl.Result, error) {
+func (r *IstioChangeReconciler) reconcileMWCChange(ctx context.Context) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("MWC tag mapping changed, reconciling")
 	if err := r.awaitIstiodConfigReadDelay(ctx); err != nil {
@@ -276,7 +217,7 @@ func (r *ConfigMapReconciler) reconcileMWCChange(ctx context.Context) (ctrl.Resu
 
 // reconcileAll performs a full reconciliation of all istio-sidecar-injector ConfigMaps,
 // bypassing change detection. Used for periodic reconciliation only.
-func (r *ConfigMapReconciler) reconcileAll(ctx context.Context) (ctrl.Result, error) {
+func (r *IstioChangeReconciler) reconcileAll(ctx context.Context) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("periodic reconciliation of all istio-sidecar-injector ConfigMaps")
 
@@ -297,7 +238,7 @@ func (r *ConfigMapReconciler) reconcileAll(ctx context.Context) (ctrl.Result, er
 			logger.Error(err, "failed to parse ConfigMap values", "configmap", cm.Name)
 			continue
 		}
-		r.setCache(client.ObjectKeyFromObject(cm).String(), vals.Revision, configmap.GetConfigMapLastModified(cm))
+		r.revisionCache.Set(client.ObjectKeyFromObject(cm).String(), vals.Revision, configmap.GetConfigMapLastModified(cm))
 	}
 
 	if err := r.awaitIstiodConfigReadDelay(ctx); err != nil {
@@ -308,9 +249,9 @@ func (r *ConfigMapReconciler) reconcileAll(ctx context.Context) (ctrl.Result, er
 
 // fetchTagMappingAndScan fetches tag-to-revision and lastModifiedByTag from MWCs, then scans and annotates.
 // limitToNamespaces, when non-empty, restricts scanning to those namespaces only (e.g. for namespace label changes).
-func (r *ConfigMapReconciler) fetchTagMappingAndScan(ctx context.Context, limitToNamespaces []string) (ctrl.Result, error) {
+func (r *IstioChangeReconciler) fetchTagMappingAndScan(ctx context.Context, limitToNamespaces []string) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-	tagToRevision, lastModifiedByTag, err := fetchTagToRevisionAndLastModified(ctx, r.Client)
+	tagToRevision, lastModifiedByTag, err := mwc.FetchTagToRevisionAndLastModified(ctx, r.Client)
 	if err != nil {
 		logger.Error(err, "failed to fetch tag-to-revision mapping")
 		return ctrl.Result{}, err
@@ -320,12 +261,12 @@ func (r *ConfigMapReconciler) fetchTagMappingAndScan(ctx context.Context, limitT
 
 // scanAndAnnotate scans for outdated pods using the current cache and annotates workloads to trigger restarts.
 // limitToNamespaces, when non-empty, restricts scanning to those namespaces only.
-func (r *ConfigMapReconciler) scanAndAnnotate(ctx context.Context, tagToRevision map[string]string, lastModifiedByTag map[string]time.Time, limitToNamespaces []string) (ctrl.Result, error) {
+func (r *IstioChangeReconciler) scanAndAnnotate(ctx context.Context, tagToRevision map[string]string, lastModifiedByTag map[string]time.Time, limitToNamespaces []string) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	if tagToRevision == nil {
 		tagToRevision = map[string]string{}
 	}
-	lastModifiedByRevision := r.getCacheCopy()
+	lastModifiedByRevision := r.revisionCache.GetCopy()
 	opts := podscanner.ScanOptions{
 		CompareHub:            r.compareHub,
 		IstiodConfigReadDelay: r.istiodConfigReadDelay,
@@ -343,7 +284,7 @@ func (r *ConfigMapReconciler) scanAndAnnotate(ctx context.Context, tagToRevision
 
 // annotateWorkloadsWithDelay annotates each workload, with an optional delay between each.
 // Exported for testing.
-func (r *ConfigMapReconciler) annotateWorkloadsWithDelay(ctx context.Context, workloads []podscanner.WorkloadRef) {
+func (r *IstioChangeReconciler) annotateWorkloadsWithDelay(ctx context.Context, workloads []podscanner.WorkloadRef) {
 	logger := log.FromContext(ctx)
 	for i, ref := range workloads {
 		if i > 0 && r.restartDelay > 0 {
@@ -371,44 +312,6 @@ func (r *ConfigMapReconciler) annotateWorkloadsWithDelay(ctx context.Context, wo
 	}
 }
 
-func (r *ConfigMapReconciler) lastModifiedChanged(revision string, lastModified time.Time) bool {
-	r.cacheMu.RLock()
-	prev := r.cache[revision]
-	r.cacheMu.RUnlock()
-
-	if prev.IsZero() {
-		return true
-	}
-	return !prev.Equal(lastModified)
-}
-
-func (r *ConfigMapReconciler) setCache(configMapKey, revision string, lastModified time.Time) {
-	r.cacheMu.Lock()
-	defer r.cacheMu.Unlock()
-	r.cache[revision] = lastModified
-	r.nameToRevision[configMapKey] = revision
-}
-
-// getCacheCopy returns a shallow copy of the revision -> LastModified map for safe concurrent use.
-func (r *ConfigMapReconciler) getCacheCopy() map[string]time.Time {
-	r.cacheMu.RLock()
-	defer r.cacheMu.RUnlock()
-	copy := make(map[string]time.Time, len(r.cache))
-	for k, v := range r.cache {
-		copy[k] = v
-	}
-	return copy
-}
-
-func (r *ConfigMapReconciler) clearCacheByConfigMap(configMapKey string) {
-	r.cacheMu.Lock()
-	defer r.cacheMu.Unlock()
-	if revision, ok := r.nameToRevision[configMapKey]; ok {
-		delete(r.cache, revision)
-		delete(r.nameToRevision, configMapKey)
-	}
-}
-
 // ConfigMapFilter returns a predicate that filters ConfigMaps to only those
 // in istio-system with name equal to or prefixed with istio-sidecar-injector.
 func ConfigMapFilter() func(client.Object) bool {
@@ -418,50 +321,5 @@ func ConfigMapFilter() func(client.Object) bool {
 		}
 		name := obj.GetName()
 		return strings.HasPrefix(name, configMapNamePrefix)
-	}
-}
-
-// MutatingWebhookFilter returns a predicate that filters MutatingWebhookConfigurations
-// to only those named istio-revision-tag-* (tag-to-revision mapping).
-func MutatingWebhookFilter() func(client.Object) bool {
-	return func(obj client.Object) bool {
-		return strings.HasPrefix(obj.GetName(), istioRevisionTagPrefix)
-	}
-}
-
-// namespaceHasIstioLabels returns true if the namespace has istio.io/rev or istio-injection in its labels.
-func namespaceHasIstioLabels(obj client.Object) bool {
-	labels := obj.GetLabels()
-	if _, ok := labels["istio.io/rev"]; ok {
-		return true
-	}
-	if v, ok := labels["istio-injection"]; ok && v != "" {
-		return true
-	}
-	return false
-}
-
-// NamespaceFilter returns a predicate that filters Namespace events to only those
-// with Istio-related labels (istio.io/rev or istio-injection). For updates, triggers
-// when either old or new has the labels to catch add, remove, or change.
-func NamespaceFilter() predicate.Funcs {
-	return predicate.Funcs{
-		CreateFunc: func(e event.CreateEvent) bool {
-			return namespaceHasIstioLabels(e.Object)
-		},
-		UpdateFunc: func(e event.UpdateEvent) bool {
-			return namespaceHasIstioLabels(e.ObjectOld) || namespaceHasIstioLabels(e.ObjectNew)
-		},
-		DeleteFunc: func(e event.DeleteEvent) bool {
-			return namespaceHasIstioLabels(e.Object)
-		},
-	}
-}
-
-// NamespaceReconcileRequest returns a reconcile.Request for a namespace-scoped reconciliation.
-// Used when a Namespace's Istio labels change.
-func NamespaceReconcileRequest(namespace string) ctrl.Request {
-	return ctrl.Request{
-		NamespacedName: types.NamespacedName{Name: namespace},
 	}
 }

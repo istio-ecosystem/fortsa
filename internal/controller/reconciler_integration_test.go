@@ -38,6 +38,9 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"github.com/istio-ecosystem/fortsa/internal/mwc"
+	"github.com/istio-ecosystem/fortsa/internal/namespace"
 )
 
 func TestReconcilerIntegration(t *testing.T) {
@@ -71,22 +74,22 @@ func TestReconcilerIntegration(t *testing.T) {
 	}
 
 	// nil webhook: integration test has no Istio webhook; scanner returns no workloads
-	reconciler := NewConfigMapReconciler(mgr.GetClient(), mgr.GetScheme(), true, true, 0, 0, 0, nil, nil)
+	reconciler := NewIstioChangeReconciler(mgr.GetClient(), mgr.GetScheme(), true, true, 0, 0, 0, nil, nil)
 	err = ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.ConfigMap{}, builder.WithPredicates(predicate.NewPredicateFuncs(ConfigMapFilter()))).
 		Watches(
 			&admissionregv1.MutatingWebhookConfiguration{},
 			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
-				return []reconcile.Request{MWCReconcileRequest()}
+				return []reconcile.Request{mwc.ReconcileRequest()}
 			}),
-			builder.WithPredicates(predicate.NewPredicateFuncs(MutatingWebhookFilter())),
+			builder.WithPredicates(predicate.NewPredicateFuncs(mwc.Filter())),
 		).
 		Watches(
 			&corev1.Namespace{},
 			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
-				return []reconcile.Request{NamespaceReconcileRequest(obj.GetName())}
+				return []reconcile.Request{namespace.ReconcileRequest(obj.GetName())}
 			}),
-			builder.WithPredicates(NamespaceFilter()),
+			builder.WithPredicates(namespace.Filter()),
 		).
 		Complete(reconciler)
 	if err != nil {

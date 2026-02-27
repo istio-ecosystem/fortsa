@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/istio-ecosystem/fortsa/internal/mwc"
 	"github.com/istio-ecosystem/fortsa/internal/podscanner"
 )
 
@@ -51,31 +52,6 @@ func (c *countingAnnotator) getCount() int {
 	return c.count
 }
 
-func TestFetchTagToRevision(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = admissionregv1.AddToScheme(scheme)
-	_ = corev1.AddToScheme(scheme)
-
-	mwc := &admissionregv1.MutatingWebhookConfiguration{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "istio-revision-tag-canary",
-			Labels: map[string]string{
-				"istio.io/tag": "canary",
-				"istio.io/rev": "1-20",
-			},
-		},
-	}
-	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(mwc).Build()
-
-	got, err := fetchTagToRevision(context.Background(), fakeClient)
-	if err != nil {
-		t.Fatalf("fetchTagToRevision: %v", err)
-	}
-	if got["canary"] != "1-20" {
-		t.Errorf("fetchTagToRevision: want canary->1-20, got %v", got)
-	}
-}
-
 func TestPeriodicReconcileRequest(t *testing.T) {
 	req := PeriodicReconcileRequest()
 	if req.Namespace != "istio-system" {
@@ -86,17 +62,7 @@ func TestPeriodicReconcileRequest(t *testing.T) {
 	}
 }
 
-func TestMWCReconcileRequest(t *testing.T) {
-	req := MWCReconcileRequest()
-	if req.Namespace != "istio-system" {
-		t.Errorf("MWCReconcileRequest namespace = %q, want istio-system", req.Namespace)
-	}
-	if req.Name != "__mwc_reconcile__" {
-		t.Errorf("MWCReconcileRequest name = %q, want __mwc_reconcile__", req.Name)
-	}
-}
-
-func TestConfigMapReconciler_Reconcile_PeriodicTrigger(t *testing.T) {
+func TestIstioChangeReconciler_Reconcile_PeriodicTrigger(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = admissionregv1.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
@@ -107,7 +73,7 @@ func TestConfigMapReconciler_Reconcile_PeriodicTrigger(t *testing.T) {
 		},
 	}
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cm).Build()
-	r := NewConfigMapReconciler(fakeClient, scheme, false, true, 0, 0, 0, nil, nil)
+	r := NewIstioChangeReconciler(fakeClient, scheme, false, true, 0, 0, 0, nil, nil)
 	req := PeriodicReconcileRequest()
 	_, err := r.Reconcile(context.Background(), req)
 	if err != nil {
@@ -117,7 +83,7 @@ func TestConfigMapReconciler_Reconcile_PeriodicTrigger(t *testing.T) {
 	// Verifies reconcileAll runs without error
 }
 
-func TestConfigMapReconciler_Reconcile_MWCTrigger(t *testing.T) {
+func TestIstioChangeReconciler_Reconcile_MWCTrigger(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = admissionregv1.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
@@ -128,59 +94,14 @@ func TestConfigMapReconciler_Reconcile_MWCTrigger(t *testing.T) {
 		},
 	}
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cm).Build()
-	r := NewConfigMapReconciler(fakeClient, scheme, false, true, 0, 0, 0, nil, nil)
-	req := MWCReconcileRequest()
+	r := NewIstioChangeReconciler(fakeClient, scheme, false, true, 0, 0, 0, nil, nil)
+	req := mwc.ReconcileRequest()
 	_, err := r.Reconcile(context.Background(), req)
 	if err != nil {
 		t.Fatalf("Reconcile(MWC): %v", err)
 	}
 	// MWC reconcile runs fetchTagMappingAndScan; with nil webhook, scanner returns no workloads
 	// Verifies reconcileMWCChange runs without error
-}
-
-func TestMutatingWebhookFilter(t *testing.T) {
-	filter := MutatingWebhookFilter()
-	tests := []struct {
-		name     string
-		obj      *admissionregv1.MutatingWebhookConfiguration
-		wantPass bool
-	}{
-		{
-			name: "istio-revision-tag-default",
-			obj: &admissionregv1.MutatingWebhookConfiguration{
-				ObjectMeta: metav1.ObjectMeta{Name: "istio-revision-tag-default"},
-			},
-			wantPass: true,
-		},
-		{
-			name: "istio-revision-tag-canary",
-			obj: &admissionregv1.MutatingWebhookConfiguration{
-				ObjectMeta: metav1.ObjectMeta{Name: "istio-revision-tag-canary"},
-			},
-			wantPass: true,
-		},
-		{
-			name: "istio-sidecar-injector",
-			obj: &admissionregv1.MutatingWebhookConfiguration{
-				ObjectMeta: metav1.ObjectMeta{Name: "istio-sidecar-injector"},
-			},
-			wantPass: false,
-		},
-		{
-			name: "other-webhook",
-			obj: &admissionregv1.MutatingWebhookConfiguration{
-				ObjectMeta: metav1.ObjectMeta{Name: "other-webhook"},
-			},
-			wantPass: false,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := filter(tt.obj); got != tt.wantPass {
-				t.Errorf("MutatingWebhookFilter() = %v, want %v", got, tt.wantPass)
-			}
-		})
-	}
 }
 
 func TestConfigMapFilter(t *testing.T) {
@@ -228,76 +149,14 @@ func TestConfigMapFilter(t *testing.T) {
 	}
 }
 
-func TestConfigMapReconciler_lastModifiedChanged(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = corev1.AddToScheme(scheme)
-	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
-
-	r := NewConfigMapReconciler(fakeClient, scheme, false, true, 0, 0, 0, nil, nil)
-
-	t1 := time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC)
-	t2 := time.Date(2024, 1, 15, 11, 0, 0, 0, time.UTC)
-
-	// First call: no cache, should report changed
-	if !r.lastModifiedChanged("default", t1) {
-		t.Error("lastModifiedChanged: want true (no cache)")
-	}
-
-	// Set cache
-	r.setCache("istio-system/cm", "default", t1)
-
-	// Same timestamp: should report not changed
-	if r.lastModifiedChanged("default", t1) {
-		t.Error("lastModifiedChanged: want false (same timestamp)")
-	}
-
-	// Different timestamp: should report changed
-	if !r.lastModifiedChanged("default", t2) {
-		t.Error("lastModifiedChanged: want true (timestamp changed)")
-	}
-}
-
-func TestConfigMapReconciler_getCacheCopy(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = corev1.AddToScheme(scheme)
-	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
-
-	t1 := time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC)
-	r := NewConfigMapReconciler(fakeClient, scheme, false, true, 0, 0, 0, nil, nil)
-	r.setCache("istio-system/cm", "default", t1)
-
-	copy := r.getCacheCopy()
-	if len(copy) != 1 {
-		t.Fatalf("getCacheCopy: want 1 entry, got %d", len(copy))
-	}
-	if !copy["default"].Equal(t1) {
-		t.Errorf("getCacheCopy: want %v, got %v", t1, copy["default"])
-	}
-}
-
-func TestConfigMapReconciler_clearCacheByConfigMap(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = corev1.AddToScheme(scheme)
-	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
-
-	r := NewConfigMapReconciler(fakeClient, scheme, false, true, 0, 0, 0, nil, nil)
-	r.setCache("istio-system/cm", "default", time.Now())
-
-	r.clearCacheByConfigMap("istio-system/cm")
-	copy := r.getCacheCopy()
-	if len(copy) != 0 {
-		t.Errorf("clearCacheByConfigMap: want empty cache, got %d entries", len(copy))
-	}
-}
-
-func TestConfigMapReconciler_annotateWorkloadsWithDelay(t *testing.T) {
+func TestIstioChangeReconciler_annotateWorkloadsWithDelay(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 
 	t.Run("no delay annotates all workloads", func(t *testing.T) {
 		ann := &countingAnnotator{}
-		r := &ConfigMapReconciler{
+		r := &IstioChangeReconciler{
 			Client:       fakeClient,
 			annotator:    ann,
 			dryRun:       false,
@@ -315,7 +174,7 @@ func TestConfigMapReconciler_annotateWorkloadsWithDelay(t *testing.T) {
 
 	t.Run("delay between workloads", func(t *testing.T) {
 		ann := &countingAnnotator{}
-		r := &ConfigMapReconciler{
+		r := &IstioChangeReconciler{
 			Client:       fakeClient,
 			annotator:    ann,
 			dryRun:       false,
@@ -332,13 +191,13 @@ func TestConfigMapReconciler_annotateWorkloadsWithDelay(t *testing.T) {
 			t.Errorf("annotateWorkloadsWithDelay: annotator called %d times, want 2", got)
 		}
 		if elapsed < 1*time.Second {
-			t.Errorf("annotateWorkloadsWithDelay: elapsed %v, want >= 5ms (delay between workloads)", elapsed)
+			t.Errorf("annotateWorkloadsWithDelay: elapsed %v, want >= 1s (delay between workloads)", elapsed)
 		}
 	})
 
 	t.Run("context cancel during delay exits early", func(t *testing.T) {
 		ann := &countingAnnotator{}
-		r := &ConfigMapReconciler{
+		r := &IstioChangeReconciler{
 			Client:       fakeClient,
 			annotator:    ann,
 			dryRun:       false,
@@ -364,7 +223,7 @@ func TestConfigMapReconciler_annotateWorkloadsWithDelay(t *testing.T) {
 
 	t.Run("dry-run does not annotate", func(t *testing.T) {
 		ann := &countingAnnotator{}
-		r := &ConfigMapReconciler{
+		r := &IstioChangeReconciler{
 			Client:       fakeClient,
 			annotator:    ann,
 			dryRun:       true,
