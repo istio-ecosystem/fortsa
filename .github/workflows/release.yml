@@ -25,6 +25,7 @@ jobs:
         with:
           ref: ${{ github.ref }}
           fetch-depth: 0
+          fetch-tags: true
 
       - name: Setup Go
         uses: actions/setup-go@v6
@@ -100,7 +101,7 @@ jobs:
       - name: Build and push helm chart
         run: |
           make helm-build IMAGE_TAG_BASE="ghcr.io/${{ github.repository }}" VERSION="${{ steps.compute_version.outputs.IMAGE_TAG }}"
-          helm push ./build/fortsa-${{ steps.compute_version.outputs.IMAGE_TAG }}.tgz oci://ghcr.io/${{ github.repository_owner }}/helm
+          helm push ./build/fortsa-helm-chart-${{ steps.compute_version.outputs.IMAGE_TAG }}.tgz oci://ghcr.io/${{ github.repository_owner }}/helm
 
       - name: Install chart-releaser
         run: |
@@ -123,7 +124,7 @@ jobs:
             -o "${{ github.repository_owner }}" \
             -r "$REPO_NAME" \
             --config .cr.yaml \
-            --release-name-template "{{ .Version }}" \
+            --release-name-template "v{{ .Version }}" \
             --skip-existing \
             --make-release-latest=${{ steps.compute_version.outputs.MAKE_LATEST }}
         env:
@@ -137,7 +138,7 @@ jobs:
             -o "${{ github.repository_owner }}" \
             -r "$REPO_NAME" \
             --config .cr.yaml \
-            --release-name-template "{{ .Version }}" \
+            --release-name-template "v{{ .Version }}" \
             --push
         env:
           CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
