@@ -6,6 +6,26 @@
 ##
 # fullnameOverride: ""
 
+## Fortsa controller options
+##
+fortsaOptions:
+  ## Period between full reconciliations of all istio-sidecar-injector ConfigMaps.
+  ## Use "0" to disable periodic reconciliation.
+  reconcilePeriod: "10h"
+  ## If true, log what would be done without annotating workloads.
+  dryRun: false
+  ## If true, require container image registry to match ConfigMap hub when detecting outdated pods.
+  ## This is useful if something mutates the registry part of pod images
+  compareHub: false
+  ## Delay between restarting each workload (e.g. 5s). Use "0" for no delay.
+  restartDelay: "10s"
+  ## Wait for Istiod to read the updated ConfigMap before scanning (e.g. 10s). Use "0" to skip.
+  istiodConfigReadDelay: "10s"
+  ## Skip re-annotating a workload if it was annotated within this duration. Use "0" to disable.
+  annotationCooldown: "5m"
+  ## Comma-separated list of namespaces to skip when scanning pods for outdated sidecars.
+  skipNamespaces: "kube-system,istio-system"
+
 ## Configure the controller manager deployment
 ##
 manager:
@@ -18,7 +38,6 @@ manager:
   ##
   args:
     - --leader-elect
-    - --annotation-cooldown=5m
   ## Environment variables
   ##
   env: []

@@ -131,7 +131,7 @@ func main() {
 		"Delay between restarting each workload (e.g. 5s). Use 0 for no delay.")
 	pflag.DurationVar(&istiodConfigReadDelay, "istiod-config-read-delay", 10*time.Second,
 		"Wait for Istiod to read the updated ConfigMap before scanning (e.g. 10s). Use 0 to skip.")
-	pflag.DurationVar(&reconcilePeriod, "reconcile-period", 1*time.Hour,
+	pflag.DurationVar(&reconcilePeriod, "reconcile-period", 0,
 		"Period between full reconciliations of all istio-sidecar-injector ConfigMaps. "+
 			"Use 0 to disable periodic reconciliation.")
 	pflag.DurationVar(&annotationCooldown, "annotation-cooldown", 5*time.Minute,
