@@ -3,6 +3,10 @@ name: E2E Tests (comment '/test-e2e' to trigger)
 on:
   issue_comment:
     types: [created]
+  push:
+    paths:
+      - '**.go'
+      - '.github/workflows/test-e2e.yml' # for testing changes to the workflow
 
 permissions:
   contents: read
