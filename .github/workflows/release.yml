@@ -72,7 +72,7 @@ jobs:
           set -e
           git fetch origin
           TAG_NAME="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
-          COMMIT=$(git rev-parse "$TAG_NAME^{commit}")
+          COMMIT=$(git rev-parse "HEAD^{commit}")
           BRANCHES=$(git branch -r --contains "$COMMIT" | sed 's|^[[:space:]]*origin/||' | grep -v 'HEAD')
 
           if echo "$BRANCHES" | grep -qx 'main'; then
@@ -80,15 +80,10 @@ jobs:
             PRERELEASE="false"
             MAKE_LATEST="true"
           else
+            SHORT_SHA=$(git rev-parse --short=7 "$COMMIT")
+            IMAGE_TAG="${TAG_NAME#v}-${SHORT_SHA}"
             PRERELEASE="true"
             MAKE_LATEST="false"
-            BRANCH=$(echo "$BRANCHES" | grep -v 'main' | head -1)
-            if [ -z "$BRANCH" ]; then
-              SANITIZED="branch-unknown"
-            else
-              SANITIZED=$(echo "$BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g' | sed 's/-\+/-/g' | sed 's/^-//;s/-$//')
-            fi
-            IMAGE_TAG="${TAG_NAME#v}-${SANITIZED}"
           fi
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_OUTPUT
           echo "PRERELEASE=$PRERELEASE" >> $GITHUB_OUTPUT
