@@ -1,6 +1,6 @@
 apiVersion: v2
 name: fortsa
-description: A Helm chart to distribute fortsa
+description: Automatically update Istio's data-plane
 type: application
 version: "${__VERSION__}"
 appVersion: "${__VERSION__}"
@@ -11,5 +11,7 @@ keywords:
   - fortsa
   - dataplane
   - update
+  - sidecar
 annotations:
   kubebuilder.io/generated-by: kubebuilder
+icon: https://raw.githubusercontent.com/istio-ecosystem/fortsa/refs/heads/main/logos/fortsa-logo-colour-white-background-square.svg

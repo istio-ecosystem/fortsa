@@ -56,18 +56,6 @@ manager:
   ## Manager pod's tolerations
   ##
   tolerations: []
-## Helper RBAC roles for managing custom resources
-##
-rbacHelpers:
-  # Install convenience admin/editor/viewer roles for CRDs
-  enable: false
-## Custom Resource Definitions
-##
-crd:
-  # Install CRDs with the chart
-  enable: true
-  # Keep CRDs when uninstalling
-  keep: true
 ## Controller metrics endpoint.
 ## Enable to expose /metrics endpoint with RBAC protection.
 ##
@@ -85,12 +73,3 @@ certManager:
 ##
 prometheus:
   enable: false
-controllerManager:
-  container:
-    image:
-      repository: fortsa.scaffidi.net/fortsa
-      tag: "v0.0.0-test3-57-g92d6f9b"
-    livenessProbe:
-      initialDelaySeconds: 30
-    readinessProbe:
-      initialDelaySeconds: 30
