@@ -49,7 +49,7 @@ jobs:
           fi
 
       - name: Create and push tag
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && false
         run: |
           TAG="${{ inputs.tag }}"
           if git rev-parse "refs/tags/$TAG" &>/dev/null; then
@@ -118,18 +118,16 @@ jobs:
           rm cr.tar.gz
           cr version
 
-      - name: Upload chart to GitHub Release
-        run: |
-          REPO_NAME="${GITHUB_REPOSITORY#*/}"
-          cr upload \
-            -o "${{ github.repository_owner }}" \
-            -r "$REPO_NAME" \
-            --config .cr.yaml \
-            --release-name-template "v{{ .Version }}" \
-            --skip-existing \
-            --make-release-latest=${{ steps.compute_version.outputs.MAKE_LATEST }}
+      - name: Create release and upload Helm chart
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.compute_version.outputs.IMAGE_TAG }}
+          name: v${{ steps.compute_version.outputs.IMAGE_TAG }}
+          make_latest: ${{ steps.compute_version.outputs.MAKE_LATEST }}
+          prerelease: ${{ steps.compute_version.outputs.PRERELEASE }}
+          files: ./build/fortsa-helm-chart-${{ steps.compute_version.outputs.IMAGE_TAG }}.tgz
         env:
-          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Update chart index on gh-pages
         run: |
