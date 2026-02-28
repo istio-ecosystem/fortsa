@@ -2,6 +2,9 @@ name: Tests
 
 on:
   push:
+    paths:
+      - '**.go'
+      - '.github/workflows/test.yml' # for testing changes to the workflow
 
 jobs:
   test:

@@ -2,6 +2,9 @@ name: Lint
 
 on:
   push:
+    paths:
+      - '**.go'
+      - '.github/workflows/lint.yml' # for testing changes to the workflow
 
 jobs:
   lint:
