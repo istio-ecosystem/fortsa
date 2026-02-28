@@ -49,9 +49,12 @@ namespaces
 ```mermaid
 flowchart TB
     subgraph watches [Fortsa Watches]
-        ConfigMaps["ConfigMaps\nistio-sidecar-injector*"]
-        MWCs["MutatingWebhookConfigurations\nistio-revision-tag-*"]
-        Namespaces["Namespaces\nistio.io/rev, istio-injection"]
+        ConfigMaps["ConfigMaps
+        istio-sidecar-injector*"]
+        MWCs["MutatingWebhookConfigurations
+        istio-revision-tag-*"]
+        Namespaces["Namespaces
+        istio.io/rev, istio-injection"]
         Periodic["Periodic Reconcile"]
     end
 
@@ -67,7 +70,8 @@ flowchart TB
     end
 
     subgraph istio [Istio]
-        Webhook["Istio MutatingWebhook\ninjects sidecar"]
+        Webhook["Istio MutatingWebhook
+        injects sidecar"]
     end
 
     ConfigMaps --> Reconciler

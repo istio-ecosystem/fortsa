@@ -70,7 +70,8 @@ flowchart TB
     end
 
     subgraph istio [Istio]
-        Webhook["Istio MutatingWebhook\ninjects sidecar"]
+        Webhook["Istio MutatingWebhook
+        injects sidecar"]
     end
 
     ConfigMaps --> Reconciler
