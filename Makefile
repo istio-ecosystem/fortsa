@@ -4,7 +4,7 @@
 # - use the VERSION as arg of the bundle target (e.g make bundle VERSION=0.0.2)
 # - use environment variables to overwrite this value (e.g export VERSION=0.0.2)
 # git tags should be of the format vX.Y.Z (semver-compliant)
-GIT_TAG := $(shell git describe --tags)
+GIT_TAG := $(shell git describe --tags 2>/dev/null || echo "v0.0.0")
 VERSION ?= $(GIT_TAG:v%=%)
 GIT_COMMIT ?= $(shell if [ -n "$$(git status --porcelain 2>/dev/null)" ]; then echo "uncommitted"; else git rev-parse --short HEAD 2>/dev/null || echo "unknown"; fi)
 BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "unknown")
@@ -148,10 +148,6 @@ test-e2e: manifests generate fmt vet ## Run the e2e tests. Expected an isolated 
 .PHONY: test-e2e-istio
 test-e2e-istio: manifests generate fmt vet ## Run only the Istio e2e tests (revision tags, namespace labels, in-place upgrade).
 	KIND_CLUSTER=$(E2E_CLUSTER_PREFIX) go test ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="Istio"
-
-.PHONY: cleanup-test-e2e
-cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
-	@$(KIND) delete cluster --name $(KIND_CLUSTER)
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter

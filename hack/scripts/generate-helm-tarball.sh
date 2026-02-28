@@ -31,5 +31,5 @@ envsubst '${__VERSION__} ${__IMAGE_TAG_BASE__}' < "${CHART_SRC}/values.yaml" > "
 mkdir -p "${OUTPUT_DIR}"
 helm package "${TMP_CHART}" -d "${OUTPUT_DIR}"
 
-TARBALL="${OUTPUT_DIR}/fortsa-${__VERSION__}.tgz"
+TARBALL="${OUTPUT_DIR}/fortsa-helm-chart-${__VERSION__}.tgz"
 echo "Built: ${TARBALL}"
