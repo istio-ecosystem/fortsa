@@ -44,7 +44,13 @@ spec:
                     - --metrics-bind-address=0
                     {{- end }}
                     - --health-probe-bind-address=:8081
-                    - --reconcile-period={{ .Values.fortsaOptions.reconcilePeriod | default "10h" }}
+                    - --reconcile-period={{ (.Values.fortsaOptions).reconcilePeriod | default "10h" }}
+                    - --dry-run={{ (.Values.fortsaOptions).dryRun | default false }}
+                    - --compare-hub={{ (.Values.fortsaOptions).compareHub | default false }}
+                    - --restart-delay={{ (.Values.fortsaOptions).restartDelay | default "10s" }}
+                    - --istiod-config-read-delay={{ (.Values.fortsaOptions).istiodConfigReadDelay | default "10s" }}
+                    - --annotation-cooldown={{ (.Values.fortsaOptions).annotationCooldown | default "5m" }}
+                    - --skip-namespaces={{ (.Values.fortsaOptions).skipNamespaces | default "kube-system,istio-system" }}
                     {{- range .Values.manager.args }}
                     - {{ . }}
                     {{- end }}
