@@ -20,6 +20,15 @@ jobs:
     name: Build and Release
     runs-on: ubuntu-latest
     steps:
+
+      - name: Validate tag
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if ! [[ "${{ inputs.tag }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "Tag must match pattern v[0-9]+.[0-9]+.[0-9]+* (e.g. v1.0.0, v2.3.4-rc1)"
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v6
         with:
@@ -35,18 +44,24 @@ jobs:
       - name: Install Helm
         uses: azure/setup-helm@v4
 
+      - name: Install chart-releaser
+        run: |
+          CR_VERSION="v1.8.1"
+          ARCH=$(uname -m)
+          case "$ARCH" in
+            x86_64) CR_ARCH="linux_amd64" ;;
+            aarch64|arm64) CR_ARCH="linux_arm64" ;;
+            *) echo "Unsupported arch: $ARCH"; exit 1 ;;
+          esac
+          curl -sSLo cr.tar.gz "https://github.com/helm/chart-releaser/releases/download/${CR_VERSION}/chart-releaser_${CR_VERSION#v}_${CR_ARCH}.tar.gz"
+          tar -xzf cr.tar.gz -C /usr/local/bin
+          rm cr.tar.gz
+          cr version
+
       - name: Configure git
         run: |
           git config user.name "$GITHUB_ACTOR"
           git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
-
-      - name: Validate tag
-        if: github.event_name == 'workflow_dispatch'
-        run: |
-          if ! [[ "${{ inputs.tag }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-            echo "Tag must match pattern v[0-9]+.[0-9]+.[0-9]+* (e.g. v1.0.0, v2.3.4-rc1)"
-            exit 1
-          fi
 
       - name: Login to GHCR
         uses: docker/login-action@v3
@@ -86,20 +101,6 @@ jobs:
         run: |
           make helm-build IMAGE_TAG_BASE="ghcr.io/${{ github.repository }}" VERSION="${{ steps.compute_version.outputs.IMAGE_TAG }}"
           helm push ./build/fortsa-helm-chart-${{ steps.compute_version.outputs.IMAGE_TAG }}.tgz oci://ghcr.io/${{ github.repository_owner }}/helm
-
-      - name: Install chart-releaser
-        run: |
-          CR_VERSION="v1.8.1"
-          ARCH=$(uname -m)
-          case "$ARCH" in
-            x86_64) CR_ARCH="linux_amd64" ;;
-            aarch64|arm64) CR_ARCH="linux_arm64" ;;
-            *) echo "Unsupported arch: $ARCH"; exit 1 ;;
-          esac
-          curl -sSLo cr.tar.gz "https://github.com/helm/chart-releaser/releases/download/${CR_VERSION}/chart-releaser_${CR_VERSION#v}_${CR_ARCH}.tar.gz"
-          tar -xzf cr.tar.gz -C /usr/local/bin
-          rm cr.tar.gz
-          cr version
 
       - name: Create release and upload Helm chart
         uses: softprops/action-gh-release@v2
