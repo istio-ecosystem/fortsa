@@ -44,6 +44,7 @@ spec:
                     - --metrics-bind-address=0
                     {{- end }}
                     - --health-probe-bind-address=:8081
+                    - --reconcile-period={{ .Values.fortsaOptions.reconcilePeriod | default "10h" }}
                     {{- range .Values.manager.args }}
                     - {{ . }}
                     {{- end }}

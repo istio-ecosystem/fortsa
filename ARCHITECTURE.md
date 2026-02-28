@@ -218,7 +218,7 @@ flowchart TD
 | `--compare-hub` | false | Require container image registry to match ConfigMap hub when detecting outdated pods |
 | `--restart-delay` | 0 | Delay between restarting each workload (e.g., 5s) |
 | `--istiod-config-read-delay` | 10s | Wait for Istiod to read updated ConfigMap before scanning |
-| `--reconcile-period` | 1h | Period between full reconciliations; 0 disables periodic reconcile |
+| `--reconcile-period` | 0 | Period between full reconciliations; 0 disables periodic reconcile |
 | `--annotation-cooldown` | 5m | Skip re-annotating if workload was annotated within this duration |
 | `--skip-namespaces` | kube-system,istio-system | Comma-separated namespaces to skip when scanning pods |
 

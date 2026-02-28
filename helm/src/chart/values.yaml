@@ -6,6 +6,13 @@
 ##
 # fullnameOverride: ""
 
+## Fortsa controller options
+##
+fortsaOptions:
+  ## Period between full reconciliations of all istio-sidecar-injector ConfigMaps.
+  ## Use "0" to disable periodic reconciliation.
+  reconcilePeriod: "10h"
+
 ## Configure the controller manager deployment
 ##
 manager:
