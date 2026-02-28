@@ -1,6 +1,10 @@
 name: Lint
 
 on:
+  pull_request:
+    paths:
+      - '**.go'
+      - '.github/workflows/lint.yml' # for testing changes to the workflow
   push:
     paths:
       - '**.go'
