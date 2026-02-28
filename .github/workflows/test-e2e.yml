@@ -1,29 +1,22 @@
-name: E2E Tests (comment '/test-e2e' to trigger)
+name: E2E Tests
 
 on:
-  issue_comment:
-    types: [created]
-
-permissions:
-  contents: read
-  issues: read
-  pull-requests: read
+  workflow_dispatch:
+  push:
+    paths:
+      - '**.go'
+      - '.github/workflows/test-e2e.yml' # for testing changes to the workflow
 
 jobs:
   test-e2e:
-    name: Run e2e tests (comment '/test-e2e' to trigger)
+    name: Run e2e tests
     runs-on: ubuntu-latest
-    if: github.event.issue.pull_request && contains(github.event.comment.body, '/test-e2e')
     steps:
-      - name: Get PR branch
-        uses: xt0rted/pull-request-comment-branch@v3
-        id: pr-branch
-
       - name: Clone the code
         uses: actions/checkout@v6
         with:
-          ref: ${{ steps.pr-branch.outputs.head_ref }}
           fetch-tags: true
+          fetch-depth: 0
 
       - name: Setup Go
         uses: actions/setup-go@v6
