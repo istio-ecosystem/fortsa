@@ -7,6 +7,9 @@ on:
       - '**.go'
       - '.github/workflows/test-e2e.yml' # for testing changes to the workflow
 
+permissions:
+  contents: read
+
 jobs:
   test-e2e:
     name: Run e2e tests
