@@ -34,3 +34,5 @@ fortsa-*.tgz
 
 # Misc
 tmp
+.DS_Store
+
