@@ -48,17 +48,6 @@ jobs:
             exit 1
           fi
 
-      - name: Create and push tag
-        if: github.event_name == 'workflow_dispatch' && false
-        run: |
-          TAG="${{ inputs.tag }}"
-          if git rev-parse "refs/tags/$TAG" &>/dev/null; then
-            echo "Tag $TAG already exists"
-            exit 1
-          fi
-          git tag "$TAG"
-          git push origin "$TAG"
-
       - name: Login to GHCR
         uses: docker/login-action@v3
         with:
@@ -90,7 +79,6 @@ jobs:
           echo "MAKE_LATEST=$MAKE_LATEST" >> $GITHUB_OUTPUT
 
       - name: Build and push application image
-        if: false
         run: |
           make docker-buildx IMAGE_TAG_BASE="ghcr.io/${{ github.repository }}" VERSION="${{ steps.compute_version.outputs.IMAGE_TAG }}"
 
