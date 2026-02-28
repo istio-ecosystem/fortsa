@@ -145,6 +145,6 @@ jobs:
           CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
 
       - name: Set release to draft
-        run: gh release edit "${{ steps.compute_version.outputs.IMAGE_TAG }}" --draft
+        run: gh release edit "v${{ steps.compute_version.outputs.IMAGE_TAG }}" --draft
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
