@@ -6,6 +6,9 @@ on:
       - '**.go'
       - '.github/workflows/test.yml' # for testing changes to the workflow
 
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Run tests
