@@ -1,5 +1,9 @@
 # Fortsa
 
+[![Tests](https://github.com/istio-ecosystem/fortsa/actions/workflows/test.yml/badge.svg)](https://github.com/istio-ecosystem/fortsa/actions/workflows/test.yml)
+[![Lint](https://github.com/istio-ecosystem/fortsa/actions/workflows/lint.yml/badge.svg)](https://github.com/istio-ecosystem/fortsa/actions/workflows/lint.yml)
+[![E2E Tests](https://github.com/istio-ecosystem/fortsa/actions/workflows/test-e2e.yml/badge.svg)](https://github.com/istio-ecosystem/fortsa/actions/workflows/test-e2e.yml)
+
 <!-- markdownlint-disable MD033 -->
 <img src="logos/fortsa-logo-colour-white-background.svg"
          alt="Istio-fortsa logo" title="Istio-fortsa" width="200" />
