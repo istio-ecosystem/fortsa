@@ -1,6 +1,7 @@
 name: E2E Tests (comment '/test-e2e' to trigger)
 
 on:
+  workflow_dispatch:
   issue_comment:
     types: [created]
   push:
