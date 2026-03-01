@@ -31,6 +31,7 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
 	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 	admissionregv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -93,50 +94,35 @@ func init() {
 
 // nolint:gocyclo
 func main() {
-	var metricsAddr string
-	var enableLeaderElection bool
-	var dryRun bool
-	var compareHub bool
-	var restartDelay time.Duration
-	var istiodConfigReadDelay time.Duration
-	var reconcilePeriod time.Duration
-	var annotationCooldown time.Duration
-	var skipNamespaces string
-	var probeAddr string
-	var secureMetrics bool
-	var webhookCertPath, webhookCertName, webhookCertKey string
-	var metricsCertPath, metricsCertName, metricsCertKey string
-	var enableHTTP2 bool
-	var showVersion bool
 	var tlsOpts []func(*tls.Config)
-	pflag.BoolVar(&showVersion, "version", false, "Print version information and exit.")
-	pflag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
-	pflag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
-	pflag.BoolVar(&enableLeaderElection, "leader-elect", true, "Enable leader election for controller manager.")
-	pflag.BoolVar(&secureMetrics, "metrics-secure", true,
+	pflag.Bool("version", false, "Print version information and exit.")
+	pflag.String("metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
+	pflag.String("health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
+	pflag.Bool("leader-elect", true, "Enable leader election for controller manager.")
+	pflag.Bool("metrics-secure", true,
 		"If set, the metrics endpoint is served securely via HTTPS. Use --metrics-secure=false to use HTTP instead.")
-	pflag.StringVar(&webhookCertPath, "webhook-cert-path", "", "The directory that contains the webhook certificate.")
-	pflag.StringVar(&webhookCertName, "webhook-cert-name", "tls.crt", "The name of the webhook certificate file.")
-	pflag.StringVar(&webhookCertKey, "webhook-cert-key", "tls.key", "The name of the webhook key file.")
-	pflag.StringVar(&metricsCertPath, "metrics-cert-path", "",
+	pflag.String("webhook-cert-path", "", "The directory that contains the webhook certificate.")
+	pflag.String("webhook-cert-name", "tls.crt", "The name of the webhook certificate file.")
+	pflag.String("webhook-cert-key", "tls.key", "The name of the webhook key file.")
+	pflag.String("metrics-cert-path", "",
 		"The directory that contains the metrics server certificate.")
-	pflag.StringVar(&metricsCertName, "metrics-cert-name", "tls.crt", "The name of the metrics server certificate file.")
-	pflag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
-	pflag.BoolVar(&enableHTTP2, "enable-http2", false,
+	pflag.String("metrics-cert-name", "tls.crt", "The name of the metrics server certificate file.")
+	pflag.String("metrics-cert-key", "tls.key", "The name of the metrics server key file.")
+	pflag.Bool("enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
-	pflag.BoolVar(&dryRun, "dry-run", false, "If true, log what would be done without annotating workloads.")
-	pflag.BoolVar(&compareHub, "compare-hub", false,
+	pflag.Bool("dry-run", false, "If true, log what would be done without annotating workloads.")
+	pflag.Bool("compare-hub", false,
 		"If true, require container image registry to match ConfigMap hub when detecting outdated pods.")
-	pflag.DurationVar(&restartDelay, "restart-delay", 0,
+	pflag.Duration("restart-delay", 0,
 		"Delay between restarting each workload (e.g. 5s). Use 0 for no delay.")
-	pflag.DurationVar(&istiodConfigReadDelay, "istiod-config-read-delay", 10*time.Second,
+	pflag.Duration("istiod-config-read-delay", 10*time.Second,
 		"Wait for Istiod to read the updated ConfigMap before scanning (e.g. 10s). Use 0 to skip.")
-	pflag.DurationVar(&reconcilePeriod, "reconcile-period", 0,
+	pflag.Duration("reconcile-period", 0,
 		"Period between full reconciliations of all istio-sidecar-injector ConfigMaps. "+
 			"Use 0 to disable periodic reconciliation.")
-	pflag.DurationVar(&annotationCooldown, "annotation-cooldown", 5*time.Minute,
+	pflag.Duration("annotation-cooldown", 5*time.Minute,
 		"Skip re-annotating a workload if it was annotated within this duration. Use 0 to disable.")
-	pflag.StringVar(&skipNamespaces, "skip-namespaces", "kube-system,istio-system",
+	pflag.String("skip-namespaces", "kube-system,istio-system",
 		"Comma-separated list of namespaces to skip when scanning pods for outdated sidecars.")
 
 	zapOpts := zap.Options{
@@ -144,9 +130,17 @@ func main() {
 	}
 	zapOpts.BindFlags(flag.CommandLine)
 	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
+
+	viper.SetEnvPrefix("FORTSA")
+	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
+	viper.AutomaticEnv()
+	if err := viper.BindPFlags(pflag.CommandLine); err != nil {
+		setupLog.Error(err, "unable to bind flags to viper")
+		os.Exit(1)
+	}
 	pflag.Parse()
 
-	if showVersion {
+	if viper.GetBool("version") {
 		v := Version
 		if v == "" {
 			v = "dev"
@@ -174,7 +168,7 @@ func main() {
 		c.NextProtos = []string{"http/1.1"}
 	}
 
-	if !enableHTTP2 {
+	if !viper.GetBool("enable-http2") {
 		tlsOpts = append(tlsOpts, disableHTTP2)
 	}
 
@@ -184,6 +178,9 @@ func main() {
 	// Initial webhook TLS options
 	webhookTLSOpts := tlsOpts
 
+	webhookCertPath := viper.GetString("webhook-cert-path")
+	webhookCertName := viper.GetString("webhook-cert-name")
+	webhookCertKey := viper.GetString("webhook-cert-key")
 	if len(webhookCertPath) > 0 {
 		setupLog.Info("Initializing webhook certificate watcher using provided certificates",
 			"webhook-cert-path", webhookCertPath, "webhook-cert-name", webhookCertName, "webhook-cert-key", webhookCertKey)
@@ -209,15 +206,18 @@ func main() {
 
 	// Metrics endpoint options
 	metricsServerOptions := metricsserver.Options{
-		BindAddress:   metricsAddr,
-		SecureServing: secureMetrics,
+		BindAddress:   viper.GetString("metrics-bind-address"),
+		SecureServing: viper.GetBool("metrics-secure"),
 		TLSOpts:       tlsOpts,
 	}
 
-	if secureMetrics {
+	if viper.GetBool("metrics-secure") {
 		metricsServerOptions.FilterProvider = filters.WithAuthenticationAndAuthorization
 	}
 
+	metricsCertPath := viper.GetString("metrics-cert-path")
+	metricsCertName := viper.GetString("metrics-cert-name")
+	metricsCertKey := viper.GetString("metrics-cert-key")
 	if len(metricsCertPath) > 0 {
 		setupLog.Info("Initializing metrics certificate watcher using provided certificates",
 			"metrics-cert-path", metricsCertPath, "metrics-cert-name", metricsCertName, "metrics-cert-key", metricsCertKey)
@@ -241,8 +241,8 @@ func main() {
 		Scheme:                 scheme,
 		Metrics:                metricsServerOptions,
 		WebhookServer:          webhookServer,
-		HealthProbeBindAddress: probeAddr,
-		LeaderElection:         enableLeaderElection,
+		HealthProbeBindAddress: viper.GetString("health-probe-bind-address"),
+		LeaderElection:         viper.GetBool("leader-elect"),
 		LeaderElectionID:       "71f32f9d.fortsa.scaffidi.net",
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
 		// when the Manager ends. This requires the binary to immediately end when the
@@ -261,16 +261,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	dryRun := viper.GetBool("dry-run")
 	webhookClient := webhook.NewWebhookClient(mgr.GetClient())
 	reconciler := controller.NewIstioChangeReconciler(controller.ReconcilerOptions{
 		Client:                mgr.GetClient(),
 		Scheme:                mgr.GetScheme(),
 		DryRun:                dryRun,
-		CompareHub:            compareHub,
-		RestartDelay:          restartDelay,
-		IstiodConfigReadDelay: istiodConfigReadDelay,
-		AnnotationCooldown:    annotationCooldown,
-		SkipNamespaces:        parseSkipNamespaces(skipNamespaces),
+		CompareHub:            viper.GetBool("compare-hub"),
+		RestartDelay:          viper.GetDuration("restart-delay"),
+		IstiodConfigReadDelay: viper.GetDuration("istiod-config-read-delay"),
+		AnnotationCooldown:    viper.GetDuration("annotation-cooldown"),
+		SkipNamespaces:        parseSkipNamespaces(viper.GetString("skip-namespaces")),
 		WebhookCaller:         webhookClient,
 	})
 
@@ -290,7 +291,7 @@ func main() {
 			}),
 			builder.WithPredicates(namespace.Filter()),
 		)
-	if reconcilePeriod > 0 {
+	if reconcilePeriod := viper.GetDuration("reconcile-period"); reconcilePeriod > 0 {
 		fortsaController = fortsaController.WatchesRawSource(periodic.NewReconcileSource(reconcilePeriod))
 	}
 	err = fortsaController.Complete(reconciler)
