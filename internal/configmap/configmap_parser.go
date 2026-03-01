@@ -26,11 +26,10 @@ import (
 
 // IstioValues represents the extracted values from the Istio sidecar injector ConfigMap.
 type IstioValues struct {
-	Revision     string
-	Hub          string
-	Tag          string
-	Image        string    // global.proxy.image, e.g. "proxyv2"
-	LastModified time.Time // when the ConfigMap was last updated; used to skip pods created after this time
+	Revision string
+	Hub      string
+	Tag      string
+	Image    string // global.proxy.image, e.g. "proxyv2"
 }
 
 // GetConfigMapLastModified returns the latest modification time of the ConfigMap.

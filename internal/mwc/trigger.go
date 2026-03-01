@@ -18,6 +18,7 @@ package mwc
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -78,7 +79,7 @@ func FetchTagToRevision(ctx context.Context, c client.Client) (map[string]string
 func FetchTagToRevisionAndLastModified(ctx context.Context, c client.Client) (map[string]string, map[string]time.Time, error) {
 	var mwcList admissionregv1.MutatingWebhookConfigurationList
 	if err := c.List(ctx, &mwcList); err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("list MutatingWebhookConfigurations: %w", err)
 	}
 	tagToRevision := make(map[string]string)
 	lastModifiedByTag := make(map[string]time.Time)

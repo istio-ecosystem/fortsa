@@ -18,14 +18,19 @@ package annotator
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/istio-ecosystem/fortsa/internal/podscanner"
@@ -332,5 +337,70 @@ func TestWorkloadAnnotator_getRestartedAt_unparseableTimestamp(t *testing.T) {
 	}
 	if !annotated {
 		t.Error("Annotate with unparseable restartedAt: want true (treat as no annotation), got false")
+	}
+}
+
+// conflictOnFirstPatchClient returns Conflict on the first Patch call, then delegates to the underlying client.
+type conflictOnFirstPatchClient struct {
+	client.Client
+	mu             sync.Mutex
+	firstPatchDone bool
+}
+
+func (c *conflictOnFirstPatchClient) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+	c.mu.Lock()
+	first := !c.firstPatchDone
+	c.firstPatchDone = true
+	c.mu.Unlock()
+	if first {
+		return errors.NewConflict(
+			schema.GroupResource{Group: "apps", Resource: "deployments"},
+			obj.GetName(),
+			fmt.Errorf("simulated conflict"),
+		)
+	}
+	return c.Client.Patch(ctx, obj, patch, opts...)
+}
+
+func TestWorkloadAnnotator_Annotate_conflictRetrySucceeds(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = appsv1.AddToScheme(scheme)
+
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-dep", Namespace: "default"},
+		Spec: appsv1.DeploymentSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx"}}},
+			},
+		},
+	}
+
+	baseClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(dep).
+		Build()
+	wrappingClient := &conflictOnFirstPatchClient{Client: baseClient}
+
+	a := NewWorkloadAnnotator(wrappingClient, 0)
+	ref := podscanner.WorkloadRef{
+		NamespacedName: types.NamespacedName{Namespace: dep.Namespace, Name: dep.Name},
+		Kind:           "Deployment",
+	}
+
+	annotated, err := a.Annotate(context.Background(), ref)
+	if err != nil {
+		t.Fatalf("Annotate: %v", err)
+	}
+	if !annotated {
+		t.Error("Annotate after conflict retry: want true, got false")
+	}
+
+	var updated appsv1.Deployment
+	if err := baseClient.Get(context.Background(), ref.NamespacedName, &updated); err != nil {
+		t.Fatalf("Get Deployment: %v", err)
+	}
+	if _, ok := updated.Spec.Template.Annotations[RestartedAtAnnotation]; !ok {
+		t.Error("expected fortsa.scaffidi.net/restartedAt annotation after retry")
 	}
 }

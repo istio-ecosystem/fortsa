@@ -19,14 +19,21 @@ package annotator
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/istio-ecosystem/fortsa/internal/podscanner"
+)
+
+const (
+	patchConflictMaxRetries = 3
+	patchConflictBackoff    = 50 * time.Millisecond
 )
 
 const (
@@ -59,7 +66,7 @@ func (a *WorkloadAnnotatorImpl) Annotate(ctx context.Context, ref podscanner.Wor
 	if a.annotationCooldown > 0 {
 		annotatedAt, err := a.getRestartedAt(ctx, ref)
 		if err != nil {
-			return false, err
+			return false, fmt.Errorf("get workload %s for restartedAt: %w", ref.NamespacedName, err)
 		}
 		if !annotatedAt.IsZero() && time.Since(annotatedAt) < a.annotationCooldown {
 			return false, nil // skip: already annotated recently
@@ -80,28 +87,57 @@ func (a *WorkloadAnnotatorImpl) Annotate(ctx context.Context, ref podscanner.Wor
 	}
 	patchBytes, err := json.Marshal(patch)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("marshal patch: %w", err)
 	}
 
 	switch ref.Kind {
 	case "Deployment":
-		err := a.client.Patch(ctx, &appsv1.Deployment{
-			ObjectMeta: metav1.ObjectMeta{Namespace: ref.Namespace, Name: ref.Name},
-		}, client.RawPatch(types.MergePatchType, patchBytes))
+		err := a.patchWithRetry(ctx, func() error {
+			return a.client.Patch(ctx, &appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{Namespace: ref.Namespace, Name: ref.Name},
+			}, client.RawPatch(types.MergePatchType, patchBytes))
+		})
 		return err == nil, err
 	case "StatefulSet":
-		err := a.client.Patch(ctx, &appsv1.StatefulSet{
-			ObjectMeta: metav1.ObjectMeta{Namespace: ref.Namespace, Name: ref.Name},
-		}, client.RawPatch(types.MergePatchType, patchBytes))
+		err := a.patchWithRetry(ctx, func() error {
+			return a.client.Patch(ctx, &appsv1.StatefulSet{
+				ObjectMeta: metav1.ObjectMeta{Namespace: ref.Namespace, Name: ref.Name},
+			}, client.RawPatch(types.MergePatchType, patchBytes))
+		})
 		return err == nil, err
 	case "DaemonSet":
-		err := a.client.Patch(ctx, &appsv1.DaemonSet{
-			ObjectMeta: metav1.ObjectMeta{Namespace: ref.Namespace, Name: ref.Name},
-		}, client.RawPatch(types.MergePatchType, patchBytes))
+		err := a.patchWithRetry(ctx, func() error {
+			return a.client.Patch(ctx, &appsv1.DaemonSet{
+				ObjectMeta: metav1.ObjectMeta{Namespace: ref.Namespace, Name: ref.Name},
+			}, client.RawPatch(types.MergePatchType, patchBytes))
+		})
 		return err == nil, err
 	default:
 		return false, nil
 	}
+}
+
+// patchWithRetry runs patch up to patchConflictMaxRetries times, retrying only on Conflict.
+func (a *WorkloadAnnotatorImpl) patchWithRetry(ctx context.Context, patch func() error) error {
+	var lastErr error
+	for attempt := 0; attempt < patchConflictMaxRetries; attempt++ {
+		err := patch()
+		if err == nil {
+			return nil
+		}
+		if !errors.IsConflict(err) {
+			return err
+		}
+		lastErr = err
+		if attempt < patchConflictMaxRetries-1 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(patchConflictBackoff):
+			}
+		}
+	}
+	return lastErr
 }
 
 // getRestartedAt returns the time from the workload's restartedAt annotation, or zero time if absent/unparseable.
@@ -111,19 +147,19 @@ func (a *WorkloadAnnotatorImpl) getRestartedAt(ctx context.Context, ref podscann
 	case "Deployment":
 		var dep appsv1.Deployment
 		if err := a.client.Get(ctx, ref.NamespacedName, &dep); err != nil {
-			return time.Time{}, err
+			return time.Time{}, fmt.Errorf("get workload %s for restartedAt: %w", ref.NamespacedName, err)
 		}
 		annotations = dep.Spec.Template.Annotations
 	case "StatefulSet":
 		var sts appsv1.StatefulSet
 		if err := a.client.Get(ctx, ref.NamespacedName, &sts); err != nil {
-			return time.Time{}, err
+			return time.Time{}, fmt.Errorf("get workload %s for restartedAt: %w", ref.NamespacedName, err)
 		}
 		annotations = sts.Spec.Template.Annotations
 	case "DaemonSet":
 		var ds appsv1.DaemonSet
 		if err := a.client.Get(ctx, ref.NamespacedName, &ds); err != nil {
-			return time.Time{}, err
+			return time.Time{}, fmt.Errorf("get workload %s for restartedAt: %w", ref.NamespacedName, err)
 		}
 		annotations = ds.Spec.Template.Annotations
 	default:

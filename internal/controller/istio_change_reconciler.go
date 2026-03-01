@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -145,13 +146,13 @@ func (r *IstioChangeReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			r.revisionCache.ClearByConfigMap(req.String())
 			return ctrl.Result{}, nil
 		}
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("get ConfigMap %s: %w", req.NamespacedName, err)
 	}
 
 	vals, err := configmap.ParseConfigMapValues(&cm)
 	if err != nil {
 		logger.Error(err, "failed to parse ConfigMap values")
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("parse ConfigMap %s values: %w", req.NamespacedName, err)
 	}
 	lastModified := configmap.GetConfigMapLastModified(&cm)
 	revision := vals.Revision
@@ -164,7 +165,7 @@ func (r *IstioChangeReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	// Wait for Istiod to read the updated ConfigMap before scanning (webhook uses Istiod's config)
 	// TODO: This is a hack... We should find a better mechanism.
 	if err := r.awaitIstiodConfigReadDelay(ctx); err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("await istiod config read delay: %w", err)
 	}
 
 	return r.fetchTagMappingAndScan(ctx, nil)
@@ -175,7 +176,7 @@ func (r *IstioChangeReconciler) reconcileNamespace(ctx context.Context, namespac
 	logger := log.FromContext(ctx)
 	logger.Info("reconciling namespace (Istio label change)", "namespace", namespace)
 	if err := r.awaitIstiodConfigReadDelay(ctx); err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("await istiod config read delay: %w", err)
 	}
 	return r.fetchTagMappingAndScan(ctx, []string{namespace})
 }
@@ -186,7 +187,7 @@ func (r *IstioChangeReconciler) reconcileMWCChange(ctx context.Context) (ctrl.Re
 	logger := log.FromContext(ctx)
 	logger.Info("MWC tag mapping changed, reconciling")
 	if err := r.awaitIstiodConfigReadDelay(ctx); err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("await istiod config read delay: %w", err)
 	}
 	return r.fetchTagMappingAndScan(ctx, nil)
 }
@@ -200,7 +201,7 @@ func (r *IstioChangeReconciler) reconcileAll(ctx context.Context) (ctrl.Result, 
 	var cmList corev1.ConfigMapList
 	if err := r.List(ctx, &cmList, client.InNamespace(istioSystemNamespace)); err != nil {
 		logger.Error(err, "failed to list ConfigMaps")
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("list ConfigMaps in %s: %w", istioSystemNamespace, err)
 	}
 
 	// Update cache from all matching ConfigMaps
@@ -212,13 +213,14 @@ func (r *IstioChangeReconciler) reconcileAll(ctx context.Context) (ctrl.Result, 
 		vals, err := configmap.ParseConfigMapValues(cm)
 		if err != nil {
 			logger.Error(err, "failed to parse ConfigMap values", "configmap", cm.Name)
+			// Partial success: skip invalid ConfigMap, continue with others.
 			continue
 		}
 		r.revisionCache.Set(client.ObjectKeyFromObject(cm).String(), vals.Revision, configmap.GetConfigMapLastModified(cm))
 	}
 
 	if err := r.awaitIstiodConfigReadDelay(ctx); err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("await istiod config read delay: %w", err)
 	}
 	return r.fetchTagMappingAndScan(ctx, nil)
 }
@@ -230,7 +232,7 @@ func (r *IstioChangeReconciler) fetchTagMappingAndScan(ctx context.Context, limi
 	tagToRevision, lastModifiedByTag, err := mwc.FetchTagToRevisionAndLastModified(ctx, r.Client)
 	if err != nil {
 		logger.Error(err, "failed to fetch tag-to-revision mapping")
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("fetch tag-to-revision mapping: %w", err)
 	}
 	return r.scanAndAnnotate(ctx, tagToRevision, lastModifiedByTag, limitToNamespaces)
 }
@@ -252,7 +254,7 @@ func (r *IstioChangeReconciler) scanAndAnnotate(ctx context.Context, tagToRevisi
 	workloads, err := r.scanner.ScanOutdatedPods(ctx, lastModifiedByRevision, tagToRevision, lastModifiedByTag, opts)
 	if err != nil {
 		logger.Error(err, "failed to scan pods")
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("scan outdated pods: %w", err)
 	}
 	r.annotateWorkloadsWithDelay(ctx, workloads)
 	return ctrl.Result{}, nil
@@ -270,20 +272,21 @@ func (r *IstioChangeReconciler) annotateWorkloadsWithDelay(ctx context.Context, 
 		}
 		if r.dryRun {
 			logger.Info("[dry-run] would annotate workload for restart",
-				"workload", ref.NamespacedName,
+				"namespace", ref.Namespace, "name", ref.Name,
 				"kind", ref.Kind,
 				"annotation", annotator.RestartedAtAnnotation)
 			continue
 		}
 		annotated, err := r.annotator.Annotate(ctx, ref)
 		if err != nil {
-			logger.Error(err, "failed to annotate workload", "workload", ref.NamespacedName, "kind", ref.Kind)
+			logger.Error(err, "failed to annotate workload", "namespace", ref.Namespace, "name", ref.Name, "kind", ref.Kind)
+			// Partial success: log and continue with remaining workloads.
 			continue
 		}
 		if annotated {
-			logger.Info("annotated workload for restart", "workload", ref.NamespacedName, "kind", ref.Kind)
+			logger.Info("annotated workload for restart", "namespace", ref.Namespace, "name", ref.Name, "kind", ref.Kind)
 		} else {
-			logger.Info("skipped annotating workload for restart", "workload", ref.NamespacedName, "kind", ref.Kind)
+			logger.Info("skipped annotating workload for restart", "namespace", ref.Namespace, "name", ref.Name, "kind", ref.Kind)
 		}
 	}
 }
