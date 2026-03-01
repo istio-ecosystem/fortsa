@@ -140,8 +140,7 @@ func main() {
 	}
 	pflag.Parse()
 
-	showVersion := viper.GetBool("version")
-	if showVersion {
+	if viper.GetBool("version") {
 		v := Version
 		if v == "" {
 			v = "dev"
@@ -158,7 +157,6 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&zapOpts)))
 
-	enableHTTP2 := viper.GetBool("enable-http2")
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
 	// prevent from being vulnerable to the HTTP/2 Stream Cancellation and
@@ -170,7 +168,7 @@ func main() {
 		c.NextProtos = []string{"http/1.1"}
 	}
 
-	if !enableHTTP2 {
+	if !viper.GetBool("enable-http2") {
 		tlsOpts = append(tlsOpts, disableHTTP2)
 	}
 
@@ -206,16 +204,14 @@ func main() {
 		TLSOpts: webhookTLSOpts,
 	})
 
-	metricsAddr := viper.GetString("metrics-bind-address")
-	secureMetrics := viper.GetBool("metrics-secure")
 	// Metrics endpoint options
 	metricsServerOptions := metricsserver.Options{
-		BindAddress:   metricsAddr,
-		SecureServing: secureMetrics,
+		BindAddress:   viper.GetString("metrics-bind-address"),
+		SecureServing: viper.GetBool("metrics-secure"),
 		TLSOpts:       tlsOpts,
 	}
 
-	if secureMetrics {
+	if viper.GetBool("metrics-secure") {
 		metricsServerOptions.FilterProvider = filters.WithAuthenticationAndAuthorization
 	}
 
@@ -241,14 +237,12 @@ func main() {
 		})
 	}
 
-	probeAddr := viper.GetString("health-probe-bind-address")
-	enableLeaderElection := viper.GetBool("leader-elect")
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsServerOptions,
 		WebhookServer:          webhookServer,
-		HealthProbeBindAddress:  probeAddr,
-		LeaderElection:         enableLeaderElection,
+		HealthProbeBindAddress: viper.GetString("health-probe-bind-address"),
+		LeaderElection:         viper.GetBool("leader-elect"),
 		LeaderElectionID:       "71f32f9d.fortsa.scaffidi.net",
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
 		// when the Manager ends. This requires the binary to immediately end when the
@@ -268,23 +262,16 @@ func main() {
 	}
 
 	dryRun := viper.GetBool("dry-run")
-	compareHub := viper.GetBool("compare-hub")
-	restartDelay := viper.GetDuration("restart-delay")
-	istiodConfigReadDelay := viper.GetDuration("istiod-config-read-delay")
-	annotationCooldown := viper.GetDuration("annotation-cooldown")
-	skipNamespaces := viper.GetString("skip-namespaces")
-	reconcilePeriod := viper.GetDuration("reconcile-period")
-
 	webhookClient := webhook.NewWebhookClient(mgr.GetClient())
 	reconciler := controller.NewIstioChangeReconciler(controller.ReconcilerOptions{
 		Client:                mgr.GetClient(),
 		Scheme:                mgr.GetScheme(),
 		DryRun:                dryRun,
-		CompareHub:            compareHub,
-		RestartDelay:          restartDelay,
-		IstiodConfigReadDelay: istiodConfigReadDelay,
-		AnnotationCooldown:    annotationCooldown,
-		SkipNamespaces:        parseSkipNamespaces(skipNamespaces),
+		CompareHub:            viper.GetBool("compare-hub"),
+		RestartDelay:          viper.GetDuration("restart-delay"),
+		IstiodConfigReadDelay: viper.GetDuration("istiod-config-read-delay"),
+		AnnotationCooldown:    viper.GetDuration("annotation-cooldown"),
+		SkipNamespaces:        parseSkipNamespaces(viper.GetString("skip-namespaces")),
 		WebhookCaller:         webhookClient,
 	})
 
@@ -304,7 +291,7 @@ func main() {
 			}),
 			builder.WithPredicates(namespace.Filter()),
 		)
-	if reconcilePeriod > 0 {
+	if reconcilePeriod := viper.GetDuration("reconcile-period"); reconcilePeriod > 0 {
 		fortsaController = fortsaController.WatchesRawSource(periodic.NewReconcileSource(reconcilePeriod))
 	}
 	err = fortsaController.Complete(reconciler)
