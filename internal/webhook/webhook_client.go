@@ -111,7 +111,7 @@ func (w *WebhookClient) getWebhookURLAndCABundle(ctx context.Context, revision s
 
 	caBundle, err = w.getCABundleForRevision(ctx, revision)
 	if err != nil {
-		return "", nil, err
+		return "", nil, fmt.Errorf("get caBundle for revision %s: %w", revision, err)
 	}
 	return getWebhookURL(revision), caBundle, nil
 }
@@ -220,6 +220,7 @@ func (w *WebhookClient) CallWebhook(ctx context.Context, pod *corev1.Pod, revisi
 	if err != nil {
 		return nil, fmt.Errorf("webhook request: %w", err)
 	}
+	// Close error is non-fatal for HTTP response body.
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {

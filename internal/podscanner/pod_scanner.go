@@ -187,21 +187,21 @@ func (s *PodScanner) processPodForOutdatedSidecar(ctx context.Context, pod *core
 
 	ref, err := s.findWorkloadOwner(ctx, pod)
 	if err != nil {
-		logger.Error(err, "failed to find workload owner", "pod", pod.Namespace+"/"+pod.Name)
+		logger.Error(err, "failed to find workload owner", "namespace", pod.Namespace, "name", pod.Name)
 		return nil
 	}
 	if ref == nil {
-		logger.Info("no restartableworkload owner found", "pod", pod.Namespace+"/"+pod.Name)
+		logger.Info("no restartableworkload owner found", "namespace", pod.Namespace, "name", pod.Name)
 		return nil
 	}
 
 	revOrTag, err := s.getIstioRevFromWorkloadOrNamespace(ctx, ref)
 	if err != nil {
-		logger.Error(err, "failed to get istio.io/rev from workload or namespace", "workload", ref.NamespacedName)
+		logger.Error(err, "failed to get istio.io/rev from workload or namespace", "namespace", ref.Namespace, "name", ref.Name)
 		return nil
 	}
 	if revOrTag == "" {
-		logger.V(1).Info("namespace has no istio.io/rev or istio-injection=enabled, skipping", "workload", ref.NamespacedName)
+		logger.V(1).Info("namespace has no istio.io/rev or istio-injection=enabled, skipping", "namespace", ref.Namespace, "name", ref.Name)
 		return nil
 	}
 	revision := revOrTag
@@ -213,24 +213,24 @@ func (s *PodScanner) processPodForOutdatedSidecar(ctx context.Context, pod *core
 		return nil
 	}
 
-	logger.Info("found workload", "workload", ref.Namespace+"/"+ref.Name)
+	logger.Info("found workload", "namespace", ref.Namespace, "name", ref.Name)
 
 	templatePod, err := s.buildPodFromWorkload(ctx, ref)
 	if err != nil {
-		logger.Error(err, "failed to build pod from workload", "workload", ref.NamespacedName)
+		logger.Error(err, "failed to build pod from workload", "namespace", ref.Namespace, "name", ref.Name)
 		return nil
 	}
 
 	//nolint:goconst // "default" is the Istio default revision name
 	mutated, err := s.webhookCaller.CallWebhook(ctx, templatePod, revision, revOrTag == "default")
 	if err != nil {
-		logger.Error(err, "webhook call failed", "pod", pod.Namespace+"/"+pod.Name)
+		logger.Error(err, "webhook call failed", "namespace", pod.Namespace, "name", pod.Name)
 		return nil
 	}
 
 	expectedImage := getIstioProxyImage(mutated)
 	currentImage := getIstioProxyImage(pod)
-	logger.V(1).Info("expected image", "expected", expectedImage, "current", currentImage, "pod", pod.Namespace+"/"+pod.Name)
+	logger.V(1).Info("expected image", "expected", expectedImage, "current", currentImage, "namespace", pod.Namespace, "name", pod.Name)
 	if expectedImage == "" {
 		return nil
 	}
@@ -239,7 +239,7 @@ func (s *PodScanner) processPodForOutdatedSidecar(ctx context.Context, pod *core
 	}
 
 	logger.Info("outdated image",
-		"pod", pod.Namespace+"/"+pod.Name,
+		"namespace", pod.Namespace, "name", pod.Name,
 		"revision", revision,
 		"current", currentImage,
 		"expected", expectedImage)
@@ -284,7 +284,7 @@ func (s *PodScanner) ScanOutdatedPods(ctx context.Context, lastModifiedByRevisio
 			continue
 		}
 
-		logger.Info("scanning pod", "pod", pod.Namespace+"/"+pod.Name)
+		logger.V(1).Info("scanning pod", "namespace", pod.Namespace, "name", pod.Name)
 
 		ref := s.processPodForOutdatedSidecar(ctx, pod, tagToRevision, lastModifiedByRevision, lastModifiedByTag, opts)
 		if ref == nil {
