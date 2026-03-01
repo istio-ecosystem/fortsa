@@ -18,6 +18,7 @@ package podscanner
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -131,7 +132,7 @@ func listPods(ctx context.Context, c client.Client, opts ScanOptions) (corev1.Po
 	var podList corev1.PodList
 	if len(opts.LimitToNamespaces) == 1 {
 		if err := c.List(ctx, &podList, client.InNamespace(opts.LimitToNamespaces[0])); err != nil {
-			return podList, err
+			return podList, fmt.Errorf("list pods in %s: %w", opts.LimitToNamespaces[0], err)
 		}
 	} else if len(opts.LimitToNamespaces) > 1 {
 		limitSet := make(map[string]struct{})
@@ -143,13 +144,13 @@ func listPods(ctx context.Context, c client.Client, opts ScanOptions) (corev1.Po
 		for ns := range limitSet {
 			var nsList corev1.PodList
 			if err := c.List(ctx, &nsList, client.InNamespace(ns)); err != nil {
-				return podList, err
+				return podList, fmt.Errorf("list pods in %s: %w", ns, err)
 			}
 			podList.Items = append(podList.Items, nsList.Items...)
 		}
 	} else {
 		if err := c.List(ctx, &podList); err != nil {
-			return podList, err
+			return podList, fmt.Errorf("list pods: %w", err)
 		}
 	}
 	return podList, nil
@@ -191,7 +192,7 @@ func (s *PodScanner) processPodForOutdatedSidecar(ctx context.Context, pod *core
 		return nil
 	}
 	if ref == nil {
-		logger.Info("no restartableworkload owner found", "namespace", pod.Namespace, "name", pod.Name)
+		logger.Info("no restartable workload owner found", "namespace", pod.Namespace, "name", pod.Name)
 		return nil
 	}
 
@@ -213,7 +214,7 @@ func (s *PodScanner) processPodForOutdatedSidecar(ctx context.Context, pod *core
 		return nil
 	}
 
-	logger.Info("found workload", "namespace", ref.Namespace, "name", ref.Name)
+	logger.V(1).Info("found workload", "namespace", ref.Namespace, "name", ref.Name)
 
 	templatePod, err := s.buildPodFromWorkload(ctx, ref)
 	if err != nil {

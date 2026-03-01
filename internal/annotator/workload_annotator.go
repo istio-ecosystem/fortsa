@@ -19,6 +19,7 @@ package annotator
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -65,7 +66,7 @@ func (a *WorkloadAnnotatorImpl) Annotate(ctx context.Context, ref podscanner.Wor
 	if a.annotationCooldown > 0 {
 		annotatedAt, err := a.getRestartedAt(ctx, ref)
 		if err != nil {
-			return false, err
+			return false, fmt.Errorf("get workload %s for restartedAt: %w", ref.NamespacedName, err)
 		}
 		if !annotatedAt.IsZero() && time.Since(annotatedAt) < a.annotationCooldown {
 			return false, nil // skip: already annotated recently
@@ -86,7 +87,7 @@ func (a *WorkloadAnnotatorImpl) Annotate(ctx context.Context, ref podscanner.Wor
 	}
 	patchBytes, err := json.Marshal(patch)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("marshal patch: %w", err)
 	}
 
 	switch ref.Kind {
@@ -146,19 +147,19 @@ func (a *WorkloadAnnotatorImpl) getRestartedAt(ctx context.Context, ref podscann
 	case "Deployment":
 		var dep appsv1.Deployment
 		if err := a.client.Get(ctx, ref.NamespacedName, &dep); err != nil {
-			return time.Time{}, err
+			return time.Time{}, fmt.Errorf("get workload %s for restartedAt: %w", ref.NamespacedName, err)
 		}
 		annotations = dep.Spec.Template.Annotations
 	case "StatefulSet":
 		var sts appsv1.StatefulSet
 		if err := a.client.Get(ctx, ref.NamespacedName, &sts); err != nil {
-			return time.Time{}, err
+			return time.Time{}, fmt.Errorf("get workload %s for restartedAt: %w", ref.NamespacedName, err)
 		}
 		annotations = sts.Spec.Template.Annotations
 	case "DaemonSet":
 		var ds appsv1.DaemonSet
 		if err := a.client.Get(ctx, ref.NamespacedName, &ds); err != nil {
-			return time.Time{}, err
+			return time.Time{}, fmt.Errorf("get workload %s for restartedAt: %w", ref.NamespacedName, err)
 		}
 		annotations = ds.Spec.Template.Annotations
 	default:
