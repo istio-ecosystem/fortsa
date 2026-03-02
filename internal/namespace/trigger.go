@@ -42,13 +42,15 @@ func hasIstioLabels(obj client.Object) bool {
 func Filter() predicate.Funcs {
 	return predicate.Funcs{
 		CreateFunc: func(e event.CreateEvent) bool {
-			return hasIstioLabels(e.Object)
+			// a namespace that was just created will not have any pods yet, so we don't need to reconcile it
+			return false
 		},
 		UpdateFunc: func(e event.UpdateEvent) bool {
 			return hasIstioLabels(e.ObjectOld) || hasIstioLabels(e.ObjectNew)
 		},
 		DeleteFunc: func(e event.DeleteEvent) bool {
-			return hasIstioLabels(e.Object)
+			// a namespace that was just deleted will, um... not exist anymore, so we don't need to reconcile it
+			return false
 		},
 	}
 }

@@ -24,13 +24,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 )
 
-func TestNamespaceFilter(t *testing.T) {
+func TestFilterCreateAlwaysReturnsFalse(t *testing.T) {
 	filter := Filter()
 
 	tests := []struct {
-		name     string
-		event    event.CreateEvent
-		wantPass bool
+		name  string
+		event event.CreateEvent
 	}{
 		{
 			name: "namespace with istio.io/rev",
@@ -42,7 +41,6 @@ func TestNamespaceFilter(t *testing.T) {
 					},
 				},
 			},
-			wantPass: true,
 		},
 		{
 			name: "namespace with istio-injection enabled",
@@ -54,7 +52,6 @@ func TestNamespaceFilter(t *testing.T) {
 					},
 				},
 			},
-			wantPass: true,
 		},
 		{
 			name: "namespace without Istio labels",
@@ -66,7 +63,6 @@ func TestNamespaceFilter(t *testing.T) {
 					},
 				},
 			},
-			wantPass: false,
 		},
 		{
 			name: "namespace with empty istio-injection",
@@ -78,13 +74,51 @@ func TestNamespaceFilter(t *testing.T) {
 					},
 				},
 			},
-			wantPass: false,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := filter.Create(tt.event); got != tt.wantPass {
-				t.Errorf("Filter().Create() = %v, want %v", got, tt.wantPass)
+			if got := filter.Create(tt.event); got {
+				t.Errorf("Filter().Create() = %v, want false", got)
+			}
+		})
+	}
+}
+
+func TestFilterDeleteAlwaysReturnsFalse(t *testing.T) {
+	filter := Filter()
+
+	tests := []struct {
+		name  string
+		event event.DeleteEvent
+	}{
+		{
+			name: "namespace with Istio labels",
+			event: event.DeleteEvent{
+				Object: &corev1.Namespace{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:   "test",
+						Labels: map[string]string{"istio.io/rev": "default"},
+					},
+				},
+			},
+		},
+		{
+			name: "namespace without Istio labels",
+			event: event.DeleteEvent{
+				Object: &corev1.Namespace{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:   "test",
+						Labels: map[string]string{"app": "foo"},
+					},
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := filter.Delete(tt.event); got {
+				t.Errorf("Filter().Delete() = %v, want false", got)
 			}
 		})
 	}
