@@ -4,6 +4,27 @@ entries:
   - annotations:
       kubebuilder.io/generated-by: kubebuilder
     apiVersion: v2
+    appVersion: 1.7.4
+    created: "2026-03-03T00:27:39.896885338Z"
+    description: Automatically update Istio's data-plane
+    digest: 92ec74c9de66b248e9892252673c4a55beb7db105065709f4de982fb0d15d946
+    icon: https://raw.githubusercontent.com/istio-ecosystem/fortsa/refs/heads/main/logos/fortsa-logo-colour-white-background-square.svg
+    keywords:
+    - kubernetes
+    - operator
+    - istio
+    - fortsa
+    - dataplane
+    - update
+    - sidecar
+    name: fortsa
+    type: application
+    urls:
+    - https://github.com/istio-ecosystem/fortsa/releases/download/v1.7.4/fortsa-helm-chart-1.7.4.tgz
+    version: 1.7.4
+  - annotations:
+      kubebuilder.io/generated-by: kubebuilder
+    apiVersion: v2
     appVersion: 1.7.3
     created: "2026-03-01T04:36:11.612259194Z"
     description: Automatically update Istio's data-plane
@@ -402,4 +423,4 @@ entries:
     urls:
     - https://github.com/hercynium/istio-fortsa/releases/download/v0.0.18/istio-fortsa-helm-chart-v0.0.18.tgz
     version: v0.0.18
-generated: "2026-03-01T04:36:11.612347138Z"
+generated: "2026-03-03T00:27:39.897016553Z"
