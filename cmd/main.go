@@ -125,9 +125,7 @@ func main() {
 	pflag.String("skip-namespaces", "kube-system,istio-system",
 		"Comma-separated list of namespaces to skip when scanning pods for outdated sidecars.")
 
-	zapOpts := zap.Options{
-		Development: true,
-	}
+	zapOpts := zap.Options{}
 	zapOpts.BindFlags(flag.CommandLine)
 	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
 
