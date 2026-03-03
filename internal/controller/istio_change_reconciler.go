@@ -272,20 +272,19 @@ func (r *IstioChangeReconciler) annotateWorkloadsWithDelay(ctx context.Context, 
 		}
 		if r.dryRun {
 			logger.Info("[dry-run] would annotate workload for restart",
-				"namespace", ref.Namespace, "name", ref.Name,
-				"kind", ref.Kind,
-				"annotation", annotator.RestartedAtAnnotation)
+				"namespace", ref.Namespace, "name", ref.Name, "kind", ref.Kind)
 			continue
 		}
 		annotated, err := r.annotator.Annotate(ctx, ref)
 		if err != nil {
-			logger.Error(err, "failed to annotate workload", "namespace", ref.Namespace, "name", ref.Name, "kind", ref.Kind)
+			logger.Error(err, "failed to annotate workload for restart", "namespace", ref.Namespace, "name", ref.Name, "kind", ref.Kind)
 			// Partial success: log and continue with remaining workloads.
 			continue
 		}
 		if annotated {
 			logger.Info("annotated workload for restart", "namespace", ref.Namespace, "name", ref.Name, "kind", ref.Kind)
 		} else {
+			// currently only happens due to cooldown period.
 			logger.Info("skipped annotating workload for restart", "namespace", ref.Namespace, "name", ref.Name, "kind", ref.Kind)
 		}
 	}

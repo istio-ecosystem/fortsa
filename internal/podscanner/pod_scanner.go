@@ -192,17 +192,18 @@ func (s *PodScanner) processPodForOutdatedSidecar(ctx context.Context, pod *core
 		return nil
 	}
 	if ref == nil {
-		logger.Info("no restartable workload owner found", "namespace", pod.Namespace, "name", pod.Name)
+		logger.V(1).Info("no restartable workload owner found", "namespace", pod.Namespace, "name", pod.Name)
 		return nil
 	}
 
 	revOrTag, err := s.getIstioRevFromWorkloadOrNamespace(ctx, ref)
 	if err != nil {
-		logger.Error(err, "failed to get istio.io/rev from workload or namespace", "namespace", ref.Namespace, "name", ref.Name)
+		logger.Error(err, "failed to get istio revision from workload or namespace", "namespace", ref.Namespace, "name", ref.Name, "kind", ref.Kind)
 		return nil
 	}
 	if revOrTag == "" {
-		logger.V(1).Info("namespace has no istio.io/rev or istio-injection=enabled, skipping", "namespace", ref.Namespace, "name", ref.Name)
+		logger.V(1).Info("no istio.io/rev or istio-injection=enabled on workload or namespace, skipping", "namespace",
+			ref.Namespace, "name", ref.Name, "kind", ref.Kind)
 		return nil
 	}
 	revision := revOrTag
@@ -214,11 +215,11 @@ func (s *PodScanner) processPodForOutdatedSidecar(ctx context.Context, pod *core
 		return nil
 	}
 
-	logger.V(1).Info("found workload", "namespace", ref.Namespace, "name", ref.Name)
+	logger.V(1).Info("found workload", "namespace", ref.Namespace, "name", ref.Name, "kind", ref.Kind)
 
 	templatePod, err := s.buildPodFromWorkload(ctx, ref)
 	if err != nil {
-		logger.Error(err, "failed to build pod from workload", "namespace", ref.Namespace, "name", ref.Name)
+		logger.Error(err, "failed to build check pod from workload", "namespace", ref.Namespace, "name", ref.Name, "kind", ref.Kind)
 		return nil
 	}
 
@@ -239,7 +240,7 @@ func (s *PodScanner) processPodForOutdatedSidecar(ctx context.Context, pod *core
 		return nil
 	}
 
-	logger.Info("outdated image",
+	logger.Info("outdated sidecar image found",
 		"namespace", pod.Namespace, "name", pod.Name,
 		"revision", revision,
 		"current", currentImage,
@@ -335,6 +336,7 @@ func (s *PodScanner) getIstioRevFromWorkloadOrNamespace(ctx context.Context, ref
 		}
 		// Template has no istio.io/rev; continue to namespace check below
 	default:
+		//nolint:goconst
 		return "default", nil
 	}
 
@@ -346,6 +348,7 @@ func (s *PodScanner) getIstioRevFromWorkloadOrNamespace(ctx context.Context, ref
 		return v, nil
 	}
 	if v, ok := ns.Labels["istio-injection"]; ok && v == "enabled" {
+		//nolint:goconst
 		return "default", nil
 	}
 	return "", nil
