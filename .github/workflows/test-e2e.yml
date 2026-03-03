@@ -1,12 +1,24 @@
 name: E2E Tests
 
+# run on demand, push to main, or pull request that changes code
 on:
   workflow_dispatch:
+  push:
+    branches: [ "main" ]
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Makefile'
+      - 'config/**'
+      - '.github/workflows/test-e2e.yml' # for testing changes to the workflow
   pull_request:
     paths:
       - '**.go'
       - 'go.mod'
       - 'go.sum'
+      - 'Makefile'
+      - 'config/**'
       - '.github/workflows/test-e2e.yml' # for testing changes to the workflow
 
 permissions:
