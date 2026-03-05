@@ -288,7 +288,9 @@ func main() {
 		Watches(
 			&admissionregv1.MutatingWebhookConfiguration{},
 			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
-				log.FromContext(ctx).V(1).Info("mutating webhook configuration change detected", "MutatingWebhookConfiguration", obj.GetName())
+				log.FromContext(ctx).V(1).Info("mutating webhook configuration change detected",
+					"MutatingWebhookConfiguration", obj.GetName(),
+					"Namespace", obj.GetNamespace())
 				return []reconcile.Request{mwc.ReconcileRequest()}
 			}),
 			builder.WithPredicates(predicate.NewPredicateFuncs(mwc.Filter())),
