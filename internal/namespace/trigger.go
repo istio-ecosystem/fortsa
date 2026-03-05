@@ -17,12 +17,9 @@ limitations under the License.
 package namespace
 
 import (
-	"context"
-
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	ctrl "sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -63,7 +60,6 @@ func Filter() predicate.Funcs {
 // ReconcileRequest returns a reconcile.Request for a namespace-scoped reconciliation.
 // Used when a Namespace's Istio labels change.
 func ReconcileRequest(namespace string) ctrl.Request {
-	log.FromContext(context.TODO()).V(1).Info("namespace label change detected", "namespace", namespace)
 	return ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: namespace},
 	}

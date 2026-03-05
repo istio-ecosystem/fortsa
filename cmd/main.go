@@ -43,6 +43,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -278,21 +279,24 @@ func main() {
 		Named("istio_change").
 		Watches(
 			&corev1.ConfigMap{},
-			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, _ client.Object) []reconcile.Request {
+			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+				log.FromContext(ctx).V(1).Info("configmap change detected", "ConfigMap", obj.GetName())
 				return []reconcile.Request{configmap.ReconcileRequest()}
 			}),
 			builder.WithPredicates(predicate.NewPredicateFuncs(configmap.Filter())),
 		).
 		Watches(
 			&admissionregv1.MutatingWebhookConfiguration{},
-			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
+			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+				log.FromContext(ctx).V(1).Info("mutating webhook configuration change detected", "MutatingWebhookConfiguration", obj.GetName())
 				return []reconcile.Request{mwc.ReconcileRequest()}
 			}),
 			builder.WithPredicates(predicate.NewPredicateFuncs(mwc.Filter())),
 		).
 		Watches(
 			&corev1.Namespace{},
-			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
+			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+				log.FromContext(ctx).V(1).Info("namespace label change detected", "Namespace", obj.GetName())
 				return []reconcile.Request{namespace.ReconcileRequest(obj.GetName())}
 			}),
 			builder.WithPredicates(namespace.Filter()),

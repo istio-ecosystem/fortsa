@@ -34,7 +34,6 @@ const reconcileTriggerName = "__periodic_reconcile__"
 // ReconcileRequest returns a reconcile.Request that triggers a full periodic reconciliation
 // of all istio-sidecar-injector ConfigMaps. Used by the periodic ticker source.
 func ReconcileRequest() reconcile.Request {
-	log.FromContext(context.TODO()).V(1).Info("periodic reconciliation triggered")
 	return reconcile.Request{
 		NamespacedName: types.NamespacedName{Namespace: constants.IstioSystemNamespace, Name: reconcileTriggerName},
 	}
@@ -58,6 +57,7 @@ func NewReconcileSource(period time.Duration) source.Source {
 				case <-ctx.Done():
 					return
 				case <-ticker.C:
+					log.FromContext(ctx).V(1).Info("periodic reconciliation triggered")
 					queue.Add(ReconcileRequest())
 				}
 			}

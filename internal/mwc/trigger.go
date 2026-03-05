@@ -25,7 +25,6 @@ import (
 	admissionregv1 "k8s.io/api/admissionregistration/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	ctrl "sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/istio-ecosystem/fortsa/internal/constants"
@@ -36,7 +35,6 @@ const istioRevisionTagPrefix = "istio-revision-tag-"
 // ReconcileRequest returns a reconcile.Request that triggers a tag-mapping reconciliation
 // when istio-revision-tag-* MutatingWebhookConfigurations change. Used by the MWC watch.
 func ReconcileRequest() ctrl.Request {
-	log.FromContext(context.TODO()).V(1).Info("mutating webhook configuration change detected")
 	return ctrl.Request{
 		NamespacedName: types.NamespacedName{Namespace: constants.IstioSystemNamespace, Name: constants.ReconcileTriggerNameIstioChange},
 	}
