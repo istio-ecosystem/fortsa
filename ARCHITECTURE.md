@@ -21,14 +21,14 @@ This document describes how Fortsa works internally: its components, data flows,
 fortsa/
 ├── cmd/main.go              # Entry point, flag parsing, manager setup
 ├── internal/
-│   ├── cache/               # ConfigMap revision cache for change detection
-│   ├── controller/          # IstioChangeReconciler, ConfigMap predicate, reconcile routing
-│   ├── mwc/                 # MWC predicates, tag mapping fetch, reconcile request
+│   ├── cache/               # ConfigMap revision cache for pod skip logic
+│   ├── controller/          # IstioChangeReconciler, reconcile routing
+│   ├── mwc/                 # MWC predicate, tag mapping fetch, reconcile request
 │   ├── namespace/            # Namespace predicates, reconcile request
 │   ├── periodic/            # Periodic reconcile source, reconcile request
 │   ├── podscanner/          # Pod scanning, outdated sidecar detection
 │   ├── annotator/           # Workload annotation for restarts
-│   ├── configmap/           # Istio sidecar injector ConfigMap parsing
+│   ├── configmap/           # ConfigMap predicate, reconcile request, Istio sidecar injector parsing
 │   └── webhook/             # Istio injection webhook client
 ├── config/                  # Kustomize manifests (RBAC, manager, Prometheus)
 ├── helm/src/chart/          # Helm chart for deployment
@@ -46,14 +46,19 @@ podscanner → configmap, webhook
 annotator  → podscanner
 ```
 
+The `configmap` package provides both the ConfigMap trigger (Filter, ReconcileRequest) and parser (ParseConfigMapValues, GetConfigMapLastModified). The `mwc` package provides the MWC trigger (Filter, ReconcileRequest) and tag mapping fetch (FetchTagToRevisionAndLastModified). ConfigMap and MWC both use the same reconcile request name (`__istio_change__`) so controller-runtime deduplicates their events.
+
 ## Component Architecture
 
 ```mermaid
 flowchart TB
     subgraph watches [Fortsa Watches]
-        ConfigMaps["ConfigMaps\nistio-sidecar-injector*"]
-        MWCs["MutatingWebhookConfigurations\nistio-revision-tag-*"]
-        Namespaces["Namespaces\nistio.io/rev, istio-injection"]
+        ConfigMaps["ConfigMaps
+        istio-sidecar-injector*"]
+        MWCs["MutatingWebhookConfigurations
+        istio-revision-tag-*"]
+        Namespaces["Namespaces
+        istio.io/rev, istio-injection"]
         Periodic["Periodic Reconcile"]
     end
 
@@ -98,7 +103,7 @@ The application starts in [cmd/main.go](cmd/main.go) with the following sequence
 2. **Register scheme**: `clientgoscheme` and `corev1` for Kubernetes API types
 3. **Create Manager**: controller-runtime Manager with leader election (`71f32f9d.fortsa.scaffidi.net`), metrics on `:8080`, health probes on `:8081`
 4. **Instantiate components**: `WebhookClient` and `IstioChangeReconciler` (which creates `PodScanner` and `WorkloadAnnotator` internally)
-5. **Build controller**: `For(ConfigMap)` with `ConfigMapFilter`, plus `Watches` for MutatingWebhookConfiguration, Namespace, and optional periodic source
+5. **Build controller**: `Watches` for ConfigMap (with predicate), MutatingWebhookConfiguration (with predicate), Namespace (with predicate), and optional periodic source. No primary `For` resource.
 6. **Add health checks**: `healthz.Ping` for healthz and readyz
 7. **Start manager**: `mgr.Start(ctrl.SetupSignalHandler())`
 
@@ -111,17 +116,11 @@ flowchart TD
     Reconcile[Reconcile Request]
     Reconcile --> CheckName{Request.Name?}
     CheckName -->|"__periodic_reconcile__"| ReconcileAll[reconcileAll]
-    CheckName -->|"__mwc_reconcile__"| ReconcileMWC[reconcileMWCChange]
+    CheckName -->|"__istio_change__"| ReconcileAll
     CheckName -->|Namespace only| ReconcileNS[reconcileNamespace]
-    CheckName -->|ConfigMap name| CheckNS{istio-system?}
-    CheckNS -->|No| Return[Return]
-    CheckNS -->|Yes| ParseCM[Parse ConfigMap]
-    ParseCM --> CacheCheck{lastModifiedChanged?}
-    CacheCheck -->|No| Return
-    CacheCheck -->|Yes| SetCache[Set cache]
-    SetCache --> AwaitDelay[awaitIstiodConfigReadDelay]
-    ReconcileAll --> AwaitDelay
-    ReconcileMWC --> AwaitDelay
+    CheckName -->|Other| Return[Return]
+    ReconcileAll --> ClearCache[Clear cache, repopulate from ConfigMaps]
+    ClearCache --> AwaitDelay[awaitIstiodConfigReadDelay]
     ReconcileNS --> AwaitDelay
     AwaitDelay --> FetchTag[fetchTagMappingAndScan]
     FetchTag --> ScanAnnotate[scanAndAnnotate]
@@ -133,9 +132,10 @@ flowchart TD
 | Request | Trigger | Handler |
 | ------- | ------- | ------- |
 | `__periodic_reconcile__` | Periodic ticker | `reconcileAll()` — full scan of all ConfigMaps |
-| `__mwc_reconcile__` | MWC change | `reconcileMWCChange()` — refresh tag mapping, scan |
-| Namespace-only (no namespace in req) | Namespace label change | `reconcileNamespace()` — scan only that namespace |
-| ConfigMap in `istio-system` | ConfigMap change | Standard ConfigMap reconcile (parse, cache check, delay, scan) |
+| `__istio_change__` | ConfigMap or MWC change | `reconcileAll()` — clear cache, repopulate, delay, scan |
+| Namespace-only (req.Name = namespace, req.Namespace empty) | Namespace label change | `reconcileNamespace()` — scan only that namespace |
+
+ConfigMap and MWC watches both enqueue the same request name `__istio_change__`. Controller-runtime deduplicates by NamespacedName, so multiple rapid events coalesce into a single reconcile run.
 
 All paths converge on `fetchTagMappingAndScan()` → `scanAndAnnotate()` → `annotateWorkloadsWithDelay()`.
 
@@ -224,10 +224,13 @@ flowchart TD
 
 ## Cache and Change Detection
 
-The [internal/cache](internal/cache) package provides `RevisionCache`, used by `IstioChangeReconciler` for change detection and pod skip logic:
+The [internal/cache](internal/cache) package provides `RevisionCache`, used by `IstioChangeReconciler` for pod skip logic:
 
-- **revisionToLastModified**: `revision → LastModified` — Used to detect ConfigMap changes and to skip pods created after the config was updated (with IstiodConfigReadDelay)
-- **nameToRevision**: `configMapKey → revision` — Used when a ConfigMap is deleted to clean up the cache
-- **LastModifiedChanged()**: Returns true only when the ConfigMap's LastModified differs from the cached value; avoids redundant scans when the same ConfigMap is reconciled again without changes
+- **revisionToLastModified**: `revision → LastModified` — Passed to the scanner via `GetCopy()`; pods created after config change + IstiodConfigReadDelay are skipped (they may already have the correct sidecar)
+- **nameToRevision**: `configMapKey → revision` — Cleared and repopulated on each `reconcileAll()`; ensures deleted ConfigMaps no longer appear in the cache
+- **ClearAll()**: Called at the start of `reconcileAll()` before repopulating from all matching ConfigMaps; ensures the cache reflects current cluster state
+- **GetCopy()**: Feeds `lastModifiedByRevision` into the scanner for pod skip logic
+
+The cache is repopulated from scratch on each `reconcileAll()` (triggered by ConfigMap change, MWC change, or periodic tick). There is no per-ConfigMap cache check in the reconcile path; the deduplication benefit comes from the shared request name `__istio_change__`: multiple watch events coalesce into one reconcile before the workqueue processes them.
 
 The cache is protected by a mutex for concurrent access from multiple reconcile workers.
