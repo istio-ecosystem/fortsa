@@ -17,10 +17,12 @@ limitations under the License.
 package configmap
 
 import (
+	"context"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	ctrl "sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/istio-ecosystem/fortsa/internal/constants"
@@ -29,6 +31,7 @@ import (
 // ReconcileRequest returns a reconcile.Request that triggers a ConfigMap change reconciliation
 // when istio-sidecar-injector* ConfigMaps in istio-system change. Used by the ConfigMap watch.
 func ReconcileRequest() ctrl.Request {
+	log.FromContext(context.TODO()).V(1).Info("configmap change detected")
 	return ctrl.Request{
 		NamespacedName: types.NamespacedName{Namespace: constants.IstioSystemNamespace, Name: constants.ReconcileTriggerNameIstioChange},
 	}

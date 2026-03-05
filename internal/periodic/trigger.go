@@ -22,6 +22,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
@@ -33,6 +34,7 @@ const reconcileTriggerName = "__periodic_reconcile__"
 // ReconcileRequest returns a reconcile.Request that triggers a full periodic reconciliation
 // of all istio-sidecar-injector ConfigMaps. Used by the periodic ticker source.
 func ReconcileRequest() reconcile.Request {
+	log.FromContext(context.TODO()).V(1).Info("periodic reconciliation triggered")
 	return reconcile.Request{
 		NamespacedName: types.NamespacedName{Namespace: constants.IstioSystemNamespace, Name: reconcileTriggerName},
 	}
