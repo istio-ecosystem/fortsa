@@ -83,6 +83,7 @@ func TestReconcilerIntegration(t *testing.T) {
 		CompareHub: true,
 	})
 	err = ctrl.NewControllerManagedBy(mgr).
+		Named("istio_change").
 		Watches(
 			&corev1.ConfigMap{},
 			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, _ client.Object) []reconcile.Request {
