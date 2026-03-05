@@ -17,10 +17,12 @@ limitations under the License.
 package constants
 
 const (
-	IstioSystemNamespace            = "istio-system"
-	ConfigMapNamePrefix             = "istio-sidecar-injector"
+	IstioSystemNamespace = "istio-system"
+	ConfigMapNamePrefix  = "istio-sidecar-injector"
+	// use the same name for multiple triggers so the built-in de-duplication logic works
 	ReconcileTriggerNameIstioChange = "__istio_change__"
 	LabelIstioRev                   = "istio.io/rev"
+	LabelIstioTag                   = "istio.io/tag"
 	LabelIstioInjection             = "istio-injection"
 	RestartedAtAnnotation           = "fortsa.scaffidi.net/restartedAt"
 )

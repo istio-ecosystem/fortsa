@@ -86,7 +86,7 @@ func FetchTagToRevisionAndLastModified(ctx context.Context, c client.Client) (ma
 		if !strings.HasPrefix(mwc.Name, istioRevisionTagPrefix) {
 			continue
 		}
-		tag := mwc.Labels["istio.io/tag"]
+		tag := mwc.Labels[constants.LabelIstioTag]
 		revision := mwc.Labels[constants.LabelIstioRev]
 		if tag != "" && revision != "" {
 			tagToRevision[tag] = revision
