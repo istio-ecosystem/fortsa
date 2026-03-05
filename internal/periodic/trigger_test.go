@@ -23,6 +23,8 @@ import (
 
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"github.com/istio-ecosystem/fortsa/internal/constants"
 )
 
 func TestNewReconcileSource(t *testing.T) {
@@ -83,8 +85,8 @@ func TestNewReconcileSource_contextCancelStopsTicker(t *testing.T) {
 
 func TestReconcileRequest(t *testing.T) {
 	req := ReconcileRequest()
-	if req.Namespace != "istio-system" {
-		t.Errorf("ReconcileRequest namespace = %q, want istio-system", req.Namespace)
+	if req.Namespace != constants.IstioSystemNamespace {
+		t.Errorf("ReconcileRequest namespace = %q, want %q", req.Namespace, constants.IstioSystemNamespace)
 	}
 	if req.Name != "__periodic_reconcile__" {
 		t.Errorf("ReconcileRequest name = %q, want __periodic_reconcile__", req.Name)

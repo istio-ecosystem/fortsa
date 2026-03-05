@@ -22,35 +22,31 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrl "sigs.k8s.io/controller-runtime/pkg/reconcile"
-)
 
-const (
-	istioSystemNamespace       = "istio-system"
-	configMapNamePrefix        = "istio-sidecar-injector"
-	configMapReconcileTrigName = "__istio_change__"
+	"github.com/istio-ecosystem/fortsa/internal/constants"
 )
 
 // ReconcileRequest returns a reconcile.Request that triggers a ConfigMap change reconciliation
 // when istio-sidecar-injector* ConfigMaps in istio-system change. Used by the ConfigMap watch.
 func ReconcileRequest() ctrl.Request {
 	return ctrl.Request{
-		NamespacedName: types.NamespacedName{Namespace: istioSystemNamespace, Name: configMapReconcileTrigName},
+		NamespacedName: types.NamespacedName{Namespace: constants.IstioSystemNamespace, Name: constants.ReconcileTriggerNameIstioChange},
 	}
 }
 
 // ReconcileRequestName returns the request name used for ConfigMap reconcile triggers.
 // Used by the controller to identify ConfigMap-triggered requests.
 func ReconcileRequestName() string {
-	return configMapReconcileTrigName
+	return constants.ReconcileTriggerNameIstioChange
 }
 
 // Filter returns a predicate function that filters ConfigMaps to only those
 // in istio-system with name equal to or prefixed with istio-sidecar-injector.
 func Filter() func(client.Object) bool {
 	return func(obj client.Object) bool {
-		if obj.GetNamespace() != istioSystemNamespace {
+		if obj.GetNamespace() != constants.IstioSystemNamespace {
 			return false
 		}
-		return strings.HasPrefix(obj.GetName(), configMapNamePrefix)
+		return strings.HasPrefix(obj.GetName(), constants.ConfigMapNamePrefix)
 	}
 }

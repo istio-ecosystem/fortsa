@@ -22,15 +22,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	ctrl "sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"github.com/istio-ecosystem/fortsa/internal/constants"
 )
 
 // hasIstioLabels returns true if the object has istio.io/rev or istio-injection in its labels.
 func hasIstioLabels(obj client.Object) bool {
 	labels := obj.GetLabels()
-	if _, ok := labels["istio.io/rev"]; ok {
+	if _, ok := labels[constants.LabelIstioRev]; ok {
 		return true
 	}
-	if v, ok := labels["istio-injection"]; ok && v != "" {
+	if v, ok := labels[constants.LabelIstioInjection]; ok && v != "" {
 		return true
 	}
 	return false

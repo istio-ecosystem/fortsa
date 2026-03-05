@@ -21,22 +21,24 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/istio-ecosystem/fortsa/internal/constants"
 )
 
 func TestReconcileRequest(t *testing.T) {
 	req := ReconcileRequest()
-	if req.Namespace != "istio-system" {
-		t.Errorf("ReconcileRequest namespace = %q, want istio-system", req.Namespace)
+	if req.Namespace != constants.IstioSystemNamespace {
+		t.Errorf("ReconcileRequest namespace = %q, want %q", req.Namespace, constants.IstioSystemNamespace)
 	}
-	if req.Name != "__configmap_change__" {
-		t.Errorf("ReconcileRequest name = %q, want __configmap_change__", req.Name)
+	if req.Name != constants.ReconcileTriggerNameIstioChange {
+		t.Errorf("ReconcileRequest name = %q, want %q", req.Name, constants.ReconcileTriggerNameIstioChange)
 	}
 }
 
 func TestReconcileRequestName(t *testing.T) {
 	name := ReconcileRequestName()
-	if name != "__configmap_change__" {
-		t.Errorf("ReconcileRequestName = %q, want __configmap_change__", name)
+	if name != constants.ReconcileTriggerNameIstioChange {
+		t.Errorf("ReconcileRequestName = %q, want %q", name, constants.ReconcileTriggerNameIstioChange)
 	}
 }
 
@@ -51,8 +53,8 @@ func TestFilter(t *testing.T) {
 			name: "istio-sidecar-injector in istio-system",
 			obj: &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
-					Namespace: "istio-system",
-					Name:      "istio-sidecar-injector",
+					Namespace: constants.IstioSystemNamespace,
+					Name:      constants.ConfigMapNamePrefix,
 				},
 			},
 			wantPass: true,
@@ -61,8 +63,8 @@ func TestFilter(t *testing.T) {
 			name: "istio-sidecar-injector-canary in istio-system",
 			obj: &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
-					Namespace: "istio-system",
-					Name:      "istio-sidecar-injector-canary",
+					Namespace: constants.IstioSystemNamespace,
+					Name:      constants.ConfigMapNamePrefix + "-canary",
 				},
 			},
 			wantPass: true,
@@ -72,7 +74,7 @@ func TestFilter(t *testing.T) {
 			obj: &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
 					Namespace: "default",
-					Name:      "istio-sidecar-injector",
+					Name:      constants.ConfigMapNamePrefix,
 				},
 			},
 			wantPass: false,
@@ -81,7 +83,7 @@ func TestFilter(t *testing.T) {
 			name: "other-configmap in istio-system",
 			obj: &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
-					Namespace: "istio-system",
+					Namespace: constants.IstioSystemNamespace,
 					Name:      "other-configmap",
 				},
 			},

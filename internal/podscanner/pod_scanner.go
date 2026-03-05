@@ -32,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/istio-ecosystem/fortsa/internal/configmap"
+	"github.com/istio-ecosystem/fortsa/internal/constants"
 	"github.com/istio-ecosystem/fortsa/internal/webhook"
 )
 
@@ -313,7 +314,7 @@ func (s *PodScanner) getIstioRevFromWorkloadOrNamespace(ctx context.Context, ref
 		if err := s.client.Get(ctx, ref.NamespacedName, &dep); err != nil {
 			return "", err
 		}
-		if v, ok := dep.Spec.Template.Labels["istio.io/rev"]; ok && v != "" {
+		if v, ok := dep.Spec.Template.Labels[constants.LabelIstioRev]; ok && v != "" {
 			return v, nil
 		}
 		// Template has no istio.io/rev; continue to namespace check below
@@ -322,7 +323,7 @@ func (s *PodScanner) getIstioRevFromWorkloadOrNamespace(ctx context.Context, ref
 		if err := s.client.Get(ctx, ref.NamespacedName, &sts); err != nil {
 			return "", err
 		}
-		if v, ok := sts.Spec.Template.Labels["istio.io/rev"]; ok && v != "" {
+		if v, ok := sts.Spec.Template.Labels[constants.LabelIstioRev]; ok && v != "" {
 			return v, nil
 		}
 		// Template has no istio.io/rev; continue to namespace check below
@@ -331,7 +332,7 @@ func (s *PodScanner) getIstioRevFromWorkloadOrNamespace(ctx context.Context, ref
 		if err := s.client.Get(ctx, ref.NamespacedName, &ds); err != nil {
 			return "", err
 		}
-		if v, ok := ds.Spec.Template.Labels["istio.io/rev"]; ok && v != "" {
+		if v, ok := ds.Spec.Template.Labels[constants.LabelIstioRev]; ok && v != "" {
 			return v, nil
 		}
 		// Template has no istio.io/rev; continue to namespace check below
@@ -344,10 +345,10 @@ func (s *PodScanner) getIstioRevFromWorkloadOrNamespace(ctx context.Context, ref
 	if err := s.client.Get(ctx, types.NamespacedName{Name: ref.Namespace}, &ns); err != nil {
 		return "", err
 	}
-	if v, ok := ns.Labels["istio.io/rev"]; ok && v != "" {
+	if v, ok := ns.Labels[constants.LabelIstioRev]; ok && v != "" {
 		return v, nil
 	}
-	if v, ok := ns.Labels["istio-injection"]; ok && v == "enabled" {
+	if v, ok := ns.Labels[constants.LabelIstioInjection]; ok && v == "enabled" {
 		//nolint:goconst
 		return "default", nil
 	}

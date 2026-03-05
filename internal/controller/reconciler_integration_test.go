@@ -40,6 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/istio-ecosystem/fortsa/internal/configmap"
+	"github.com/istio-ecosystem/fortsa/internal/constants"
 	"github.com/istio-ecosystem/fortsa/internal/mwc"
 	"github.com/istio-ecosystem/fortsa/internal/namespace"
 )
@@ -235,7 +236,7 @@ func TestReconcilerIntegration(t *testing.T) {
 		t.Fatalf("get Deployment: %v", err)
 	}
 	if updatedDep.Spec.Template.Annotations != nil {
-		if _, ok := updatedDep.Spec.Template.Annotations["fortsa.scaffidi.net/restartedAt"]; ok {
+		if _, ok := updatedDep.Spec.Template.Annotations[constants.RestartedAtAnnotation]; ok {
 			t.Error("dry-run: Deployment should not have restartedAt annotation")
 		}
 	}

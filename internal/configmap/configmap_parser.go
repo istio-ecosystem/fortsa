@@ -22,6 +22,8 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+
+	"github.com/istio-ecosystem/fortsa/internal/constants"
 )
 
 // IstioValues represents the extracted values from the Istio sidecar injector ConfigMap.
@@ -72,7 +74,7 @@ func ParseConfigMapValues(cm *corev1.ConfigMap) (*IstioValues, error) {
 		}
 	}
 	if vals.Revision == "" && cm.Labels != nil {
-		if v, ok := cm.Labels["istio.io/rev"]; ok && v != "" {
+		if v, ok := cm.Labels[constants.LabelIstioRev]; ok && v != "" {
 			vals.Revision = v
 		}
 	}

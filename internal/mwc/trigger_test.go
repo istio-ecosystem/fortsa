@@ -25,6 +25,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	"github.com/istio-ecosystem/fortsa/internal/constants"
 )
 
 func TestFetchTagToRevision(t *testing.T) {
@@ -51,11 +53,11 @@ func TestFetchTagToRevision(t *testing.T) {
 
 func TestReconcileRequest(t *testing.T) {
 	req := ReconcileRequest()
-	if req.Namespace != "istio-system" {
-		t.Errorf("ReconcileRequest namespace = %q, want istio-system", req.Namespace)
+	if req.Namespace != constants.IstioSystemNamespace {
+		t.Errorf("ReconcileRequest namespace = %q, want %q", req.Namespace, constants.IstioSystemNamespace)
 	}
-	if req.Name != "__mwc_reconcile__" {
-		t.Errorf("ReconcileRequest name = %q, want __mwc_reconcile__", req.Name)
+	if req.Name != constants.ReconcileTriggerNameIstioChange {
+		t.Errorf("ReconcileRequest name = %q, want %q", req.Name, constants.ReconcileTriggerNameIstioChange)
 	}
 }
 

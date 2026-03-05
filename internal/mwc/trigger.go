@@ -26,26 +26,24 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrl "sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"github.com/istio-ecosystem/fortsa/internal/constants"
 )
 
-const (
-	istioRevisionTagPrefix  = "istio-revision-tag-"
-	istioSystemNamespace    = "istio-system"
-	mwcReconcileTriggerName = "__istio_change__"
-)
+const istioRevisionTagPrefix = "istio-revision-tag-"
 
 // ReconcileRequest returns a reconcile.Request that triggers a tag-mapping reconciliation
 // when istio-revision-tag-* MutatingWebhookConfigurations change. Used by the MWC watch.
 func ReconcileRequest() ctrl.Request {
 	return ctrl.Request{
-		NamespacedName: types.NamespacedName{Namespace: istioSystemNamespace, Name: mwcReconcileTriggerName},
+		NamespacedName: types.NamespacedName{Namespace: constants.IstioSystemNamespace, Name: constants.ReconcileTriggerNameIstioChange},
 	}
 }
 
 // ReconcileRequestName returns the request name used for MWC reconcile triggers.
 // Used by the controller to identify MWC-triggered requests.
 func ReconcileRequestName() string {
-	return mwcReconcileTriggerName
+	return constants.ReconcileTriggerNameIstioChange
 }
 
 // Filter returns a predicate function that filters MutatingWebhookConfigurations
@@ -89,7 +87,7 @@ func FetchTagToRevisionAndLastModified(ctx context.Context, c client.Client) (ma
 			continue
 		}
 		tag := mwc.Labels["istio.io/tag"]
-		revision := mwc.Labels["istio.io/rev"]
+		revision := mwc.Labels[constants.LabelIstioRev]
 		if tag != "" && revision != "" {
 			tagToRevision[tag] = revision
 			lastModifiedByTag[tag] = getLastModified(mwc)

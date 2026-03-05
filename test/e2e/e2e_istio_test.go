@@ -28,6 +28,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/istio-ecosystem/fortsa/internal/constants"
 	"github.com/istio-ecosystem/fortsa/test/utils"
 )
 
@@ -38,8 +39,11 @@ const (
 	restartWaitTimeout      = 5 * time.Minute
 	restartPollInterval     = 2 * time.Second
 	fortsaNamespace         = "fortsa-system"
-	restartedAtAnnotation   = "fortsa\\.scaffidi\\.net/restartedAt"
 )
+
+func restartedAtAnnotationJSONPath() string {
+	return strings.ReplaceAll(constants.RestartedAtAnnotation, ".", `\.`)
+}
 
 func istioClusterName(suffix string) string {
 	if v := os.Getenv("KIND_CLUSTER"); v != "" {
@@ -95,7 +99,7 @@ func waitForFortsaRestart(namespace, deployment, initialPod string) string {
 	var newPod string
 	verifyRestart := func(g Gomega) {
 		cmd := exec.Command("kubectl", "get", "deployment", deployment,
-			"-o", "jsonpath={.spec.template.metadata.annotations."+restartedAtAnnotation+"}",
+			"-o", "jsonpath={.spec.template.metadata.annotations."+restartedAtAnnotationJSONPath()+"}",
 			"-n", namespace)
 		output, err := utils.Run(cmd)
 		g.Expect(err).NotTo(HaveOccurred())

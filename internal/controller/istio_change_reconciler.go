@@ -31,15 +31,11 @@ import (
 	"github.com/istio-ecosystem/fortsa/internal/annotator"
 	"github.com/istio-ecosystem/fortsa/internal/cache"
 	"github.com/istio-ecosystem/fortsa/internal/configmap"
+	"github.com/istio-ecosystem/fortsa/internal/constants"
 	"github.com/istio-ecosystem/fortsa/internal/mwc"
 	"github.com/istio-ecosystem/fortsa/internal/periodic"
 	"github.com/istio-ecosystem/fortsa/internal/podscanner"
 	"github.com/istio-ecosystem/fortsa/internal/webhook"
-)
-
-const (
-	istioSystemNamespace = "istio-system"
-	configMapNamePrefix  = "istio-sidecar-injector"
 )
 
 // waitOrContextDone waits for d or until ctx is cancelled.
@@ -150,15 +146,15 @@ func (r *IstioChangeReconciler) reconcileAll(ctx context.Context) (ctrl.Result, 
 	logger.Info("scanning all pods")
 
 	var cmList corev1.ConfigMapList
-	if err := r.List(ctx, &cmList, client.InNamespace(istioSystemNamespace)); err != nil {
+	if err := r.List(ctx, &cmList, client.InNamespace(constants.IstioSystemNamespace)); err != nil {
 		logger.Error(err, "failed to list ConfigMaps")
-		return ctrl.Result{}, fmt.Errorf("list ConfigMaps in %s: %w", istioSystemNamespace, err)
+		return ctrl.Result{}, fmt.Errorf("list ConfigMaps in %s: %w", constants.IstioSystemNamespace, err)
 	}
 
 	r.revisionCache.ClearAll()
 	for i := range cmList.Items {
 		cm := &cmList.Items[i]
-		if !strings.HasPrefix(cm.Name, configMapNamePrefix) {
+		if !strings.HasPrefix(cm.Name, constants.ConfigMapNamePrefix) {
 			continue
 		}
 		vals, err := configmap.ParseConfigMapValues(cm)
