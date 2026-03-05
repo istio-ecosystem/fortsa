@@ -28,17 +28,13 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/istio-ecosystem/fortsa/internal/constants"
 	"github.com/istio-ecosystem/fortsa/internal/podscanner"
 )
 
 const (
 	patchConflictMaxRetries = 3
 	patchConflictBackoff    = 50 * time.Millisecond
-)
-
-const (
-	// RestartedAtAnnotation is the annotation key used to trigger workload restarts.
-	RestartedAtAnnotation = "fortsa.scaffidi.net/restartedAt"
 )
 
 // WorkloadAnnotator annotates workloads to trigger restarts.
@@ -79,7 +75,7 @@ func (a *WorkloadAnnotatorImpl) Annotate(ctx context.Context, ref podscanner.Wor
 			"template": map[string]interface{}{
 				"metadata": map[string]interface{}{
 					"annotations": map[string]string{
-						RestartedAtAnnotation: value,
+						constants.RestartedAtAnnotation: value,
 					},
 				},
 			},
@@ -168,7 +164,7 @@ func (a *WorkloadAnnotatorImpl) getRestartedAt(ctx context.Context, ref podscann
 	if annotations == nil {
 		return time.Time{}, nil
 	}
-	s, ok := annotations[RestartedAtAnnotation]
+	s, ok := annotations[constants.RestartedAtAnnotation]
 	if !ok || s == "" {
 		return time.Time{}, nil
 	}

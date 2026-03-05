@@ -64,6 +64,7 @@ spec:
           - --leader-elect
           - --health-probe-bind-address=:8081
           - --annotation-cooldown=5m
+          - --zap-devel
         image: controller:latest
         name: manager
         ports: []

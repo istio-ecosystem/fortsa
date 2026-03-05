@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/istio-ecosystem/fortsa/internal/constants"
 	"github.com/istio-ecosystem/fortsa/internal/podscanner"
 )
 
@@ -77,7 +78,7 @@ func TestWorkloadAnnotator_Annotate(t *testing.T) {
 	if updated.Spec.Template.Annotations == nil {
 		t.Fatal("expected annotations on pod template")
 	}
-	if _, ok := updated.Spec.Template.Annotations["fortsa.scaffidi.net/restartedAt"]; !ok {
+	if _, ok := updated.Spec.Template.Annotations[constants.RestartedAtAnnotation]; !ok {
 		t.Error("expected fortsa.scaffidi.net/restartedAt annotation")
 	}
 	if updated.Spec.Template.Annotations["existing"] != "value" {
@@ -125,7 +126,7 @@ func TestWorkloadAnnotator_Annotate_cooldownSkipsReannotation(t *testing.T) {
 	if err := fakeClient.Get(context.Background(), ref.NamespacedName, &afterFirst); err != nil {
 		t.Fatalf("Get Deployment: %v", err)
 	}
-	firstValue := afterFirst.Spec.Template.Annotations[RestartedAtAnnotation]
+	firstValue := afterFirst.Spec.Template.Annotations[constants.RestartedAtAnnotation]
 	if firstValue == "" {
 		t.Fatal("expected restartedAt after first annotate")
 	}
@@ -143,7 +144,7 @@ func TestWorkloadAnnotator_Annotate_cooldownSkipsReannotation(t *testing.T) {
 	if err := fakeClient.Get(context.Background(), ref.NamespacedName, &afterSecond); err != nil {
 		t.Fatalf("Get Deployment: %v", err)
 	}
-	secondValue := afterSecond.Spec.Template.Annotations[RestartedAtAnnotation]
+	secondValue := afterSecond.Spec.Template.Annotations[constants.RestartedAtAnnotation]
 	if secondValue != firstValue {
 		t.Errorf("cooldown should skip re-annotation: restartedAt changed from %q to %q", firstValue, secondValue)
 	}
@@ -188,7 +189,7 @@ func TestWorkloadAnnotator_Annotate_StatefulSet(t *testing.T) {
 	if err := fakeClient.Get(context.Background(), ref.NamespacedName, &updated); err != nil {
 		t.Fatalf("Get StatefulSet: %v", err)
 	}
-	if _, ok := updated.Spec.Template.Annotations[RestartedAtAnnotation]; !ok {
+	if _, ok := updated.Spec.Template.Annotations[constants.RestartedAtAnnotation]; !ok {
 		t.Error("expected fortsa.scaffidi.net/restartedAt annotation")
 	}
 }
@@ -232,7 +233,7 @@ func TestWorkloadAnnotator_Annotate_DaemonSet(t *testing.T) {
 	if err := fakeClient.Get(context.Background(), ref.NamespacedName, &updated); err != nil {
 		t.Fatalf("Get DaemonSet: %v", err)
 	}
-	if _, ok := updated.Spec.Template.Annotations[RestartedAtAnnotation]; !ok {
+	if _, ok := updated.Spec.Template.Annotations[constants.RestartedAtAnnotation]; !ok {
 		t.Error("expected fortsa.scaffidi.net/restartedAt annotation")
 	}
 }
@@ -312,7 +313,7 @@ func TestWorkloadAnnotator_getRestartedAt_unparseableTimestamp(t *testing.T) {
 		Spec: appsv1.DeploymentSpec{
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{RestartedAtAnnotation: "not-a-valid-timestamp"},
+					Annotations: map[string]string{constants.RestartedAtAnnotation: "not-a-valid-timestamp"},
 				},
 				Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx"}}},
 			},
@@ -400,7 +401,7 @@ func TestWorkloadAnnotator_Annotate_conflictRetrySucceeds(t *testing.T) {
 	if err := baseClient.Get(context.Background(), ref.NamespacedName, &updated); err != nil {
 		t.Fatalf("Get Deployment: %v", err)
 	}
-	if _, ok := updated.Spec.Template.Annotations[RestartedAtAnnotation]; !ok {
+	if _, ok := updated.Spec.Template.Annotations[constants.RestartedAtAnnotation]; !ok {
 		t.Error("expected fortsa.scaffidi.net/restartedAt annotation after retry")
 	}
 }

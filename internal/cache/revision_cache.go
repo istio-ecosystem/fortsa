@@ -78,3 +78,12 @@ func (c *RevisionCache) ClearByConfigMap(configMapKey string) {
 		delete(c.nameToRevision, configMapKey)
 	}
 }
+
+// ClearAll removes all cache entries. Used before repopulating from a ConfigMap list
+// so that deleted ConfigMaps are removed from the cache.
+func (c *RevisionCache) ClearAll() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.revisionToLastModified = make(map[string]time.Time)
+	c.nameToRevision = make(map[string]string)
+}

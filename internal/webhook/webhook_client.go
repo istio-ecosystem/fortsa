@@ -36,13 +36,13 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	"github.com/istio-ecosystem/fortsa/internal/constants"
 )
 
 const (
-	istioSystemNamespace        = "istio-system"
 	injectPath                  = "/inject"
 	injectPort                  = 443
-	webhookConfigPrefix         = "istio-sidecar-injector"
 	defaultTagWebhookConfigName = "istio-revision-tag-default"
 )
 
@@ -82,7 +82,7 @@ func urlFromClientConfig(cfg admissionregv1.WebhookClientConfig) (string, error)
 			path = "/" + path
 		}
 	}
-	ns := istioSystemNamespace
+	ns := constants.IstioSystemNamespace
 	if svc.Namespace != "" {
 		ns = svc.Namespace
 	}
@@ -119,9 +119,9 @@ func (w *WebhookClient) getWebhookURLAndCABundle(ctx context.Context, revision s
 // getCABundleForRevision returns the caBundle from the MutatingWebhookConfiguration
 // for the given Istio revision. Config name: istio-sidecar-injector (default) or istio-sidecar-injector-<revision>.
 func (w *WebhookClient) getCABundleForRevision(ctx context.Context, revision string) ([]byte, error) {
-	configName := webhookConfigPrefix
+	configName := constants.ConfigMapNamePrefix
 	if revision != "" && revision != "default" {
-		configName = webhookConfigPrefix + "-" + revision
+		configName = constants.ConfigMapNamePrefix + "-" + revision
 	}
 	var mwc admissionregv1.MutatingWebhookConfiguration
 	if err := w.k8sClient.Get(ctx, types.NamespacedName{Name: configName}, &mwc); err != nil {
@@ -162,7 +162,7 @@ func getWebhookURL(revision string) string {
 		svcName = "istiod-" + revision
 	}
 	// Use full FQDN for in-cluster DNS resolution
-	return fmt.Sprintf("https://%s.%s.svc:%d%s", svcName, istioSystemNamespace, injectPort, injectPath)
+	return fmt.Sprintf("https://%s.%s.svc:%d%s", svcName, constants.IstioSystemNamespace, injectPort, injectPath)
 }
 
 // CallWebhook sends the pod to the Istio injection webhook and returns the mutated pod.

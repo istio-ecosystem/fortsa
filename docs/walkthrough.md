@@ -12,35 +12,38 @@ Fortsa runs as a controller-runtime manager. The entry point is responsible for:
 - Constructing the Webhook client and the main reconciler.
 - Defining which objects are watched and how events enqueue reconcile requests.
 
-At startup it wires a controller that is primarily `For(ConfigMap)` with additional watches for:
+At startup it wires a controller with watches for:
 
-- Istio’s tag-mapping `MutatingWebhookConfiguration` objects (`istio-revision-tag-*`).
+- ConfigMaps: `istio-sidecar-injector*` in `istio-system`.
+- Istio's tag-mapping `MutatingWebhookConfiguration` objects (`istio-revision-tag-*`).
 - Namespaces whose Istio labels change (`istio.io/rev` or `istio-injection`).
 - An optional periodic reconcile source when `--reconcile-period` is set.
 
-### 2) Watches and reconcile requests (`internal/mwc`, `internal/namespace`, `internal/periodic`)
+There is no primary `For` resource; all four are independent watches.
 
-Fortsa watches three kinds of inputs:
+### 2) Watches and reconcile requests (`internal/configmap`, `internal/mwc`, `internal/namespace`, `internal/periodic`)
 
-- ConfigMaps: `istio-sidecar-injector*` in `istio-system` (primary signal).
+Fortsa watches four kinds of inputs:
+
+- ConfigMaps: `istio-sidecar-injector*` in `istio-system`.
 - MutatingWebhookConfigurations: `istio-revision-tag-*` (tag-to-revision mapping changes).
 - Namespaces: changes to Istio-related labels (`istio.io/rev` and `istio-injection`).
+- Optional periodic ticker when `--reconcile-period` is set.
 
-Two of these watches do not reconcile the watched object directly. Instead, they enqueue a synthetic reconcile request that the reconciler interprets:
+ConfigMap and MWC watches do not reconcile the watched object directly. Instead, they enqueue a synthetic reconcile request named `__istio_change__`. Because both use the same request name, controller-runtime deduplicates: multiple rapid events (e.g., several ConfigMaps changing) coalesce into a single reconcile run.
 
-- The MWC watch enqueues a request named `__mwc_reconcile__`.
-- The periodic source enqueues a request named `__periodic_reconcile__`.
+The periodic source enqueues a request named `__periodic_reconcile__`.
 
-The namespace watch encodes “scan only this namespace” by issuing a request with a name but no namespace field, and the reconciler treats that shape specially.
+The namespace watch encodes “scan only this namespace” by issuing a request with the namespace name in the request name and an empty namespace field, and the reconciler treats that shape specially.
 
 ### 3) The main reconciler: routing and convergence (`internal/controller`)
 
 `IstioChangeReconciler` is the single reconciler implementation used by the controller. It routes reconcile requests by inspecting the request fields:
 
-- Name equals `__periodic_reconcile__`: refresh the ConfigMap-derived cache from all matching ConfigMaps, then scan.
-- Name equals `__mwc_reconcile__`: refresh tag mapping, then scan (ConfigMaps are unchanged).
+- Name equals `__periodic_reconcile__`: clear the cache, repopulate from all matching ConfigMaps, await delay, then scan.
+- Name equals `__istio_change__` (ConfigMap or MWC change): same as periodic—clear cache, repopulate, await delay, then scan.
 - Namespace is empty and name is set: treat name as a namespace and scan only that namespace.
-- Otherwise: treat it as a ConfigMap reconcile request and proceed with parsing and change detection.
+- Otherwise: ignore (unknown request).
 
 All paths converge into the same pipeline:
 
@@ -55,17 +58,16 @@ Fortsa reads the Istio sidecar injector ConfigMap data at `data["values"]` (JSON
 - Revision: from `revision`, `global.revision`, or ConfigMap label `istio.io/rev`, defaulting to `default`.
 - Hub, tag, and proxy image: from `global.hub`, `global.tag`, and `global.proxy.image`.
 
-It also computes a “last modified” timestamp for each ConfigMap using managed fields timestamps when available (falling back to creation timestamp). This timestamp is used for:
+It also computes a “last modified” timestamp for each ConfigMap using managed fields timestamps when available (falling back to creation timestamp). This timestamp feeds pod skip logic: pods created after the config change plus `--istiod-config-read-delay` are skipped (they may already have the correct sidecar).
 
-- Change detection (avoid rescanning on reconciles that do not represent a real config change).
-- Skip logic (avoid scanning pods that were created after the config change plus a delay window).
+### 5) Cache state: `RevisionCache` (`internal/cache`)
 
-### 5) Change detection state: `RevisionCache` (`internal/cache`)
+The reconciler maintains a process-local cache used for pod skip logic:
 
-The reconciler maintains a process-local cache:
+- `revision -> lastModified`: passed to the scanner via `GetCopy()`; pods created after config change + delay are skipped.
+- `configMapKey -> revision`: cleared and repopulated on each `reconcileAll()`; ensures deleted ConfigMaps no longer appear in the cache.
 
-- `revision -> lastModified`: used to detect changes and to feed skip logic.
-- `configMapKey -> revision`: used to remove cache entries when a watched ConfigMap is deleted.
+On each ConfigMap, MWC, or periodic-triggered reconcile, the cache is cleared and repopulated from the current ConfigMap list before scanning. There is no per-ConfigMap change check in the reconcile path; deduplication comes from the shared request name `__istio_change__`, which causes multiple watch events to coalesce into one reconcile.
 
 This cache is guarded by a mutex because reconciles can run concurrently.
 
@@ -153,9 +155,9 @@ Safety features:
 - `--restart-delay`: optional throttle between annotations.
 - `--dry-run`: do not patch, only log “would annotate”.
 
-### 12) Periodic and namespace triggers feed the same pipeline
+### 12) All triggers feed the same pipeline
 
-Regardless of trigger source (ConfigMap change, tag mapping change, namespace label change, or periodic tick), the system converges to:
+Regardless of trigger source (ConfigMap change, MWC change, namespace label change, or periodic tick), the system converges to:
 
 - Fetch tag mapping.
 - Scan pods and dedupe workloads.

@@ -39,6 +39,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/istio-ecosystem/fortsa/internal/configmap"
+	"github.com/istio-ecosystem/fortsa/internal/constants"
 	"github.com/istio-ecosystem/fortsa/internal/mwc"
 	"github.com/istio-ecosystem/fortsa/internal/namespace"
 )
@@ -81,7 +83,14 @@ func TestReconcilerIntegration(t *testing.T) {
 		CompareHub: true,
 	})
 	err = ctrl.NewControllerManagedBy(mgr).
-		For(&corev1.ConfigMap{}, builder.WithPredicates(predicate.NewPredicateFuncs(ConfigMapFilter()))).
+		Named("istio_change").
+		Watches(
+			&corev1.ConfigMap{},
+			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, _ client.Object) []reconcile.Request {
+				return []reconcile.Request{configmap.ReconcileRequest()}
+			}),
+			builder.WithPredicates(predicate.NewPredicateFuncs(configmap.Filter())),
+		).
 		Watches(
 			&admissionregv1.MutatingWebhookConfiguration{},
 			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
@@ -228,7 +237,7 @@ func TestReconcilerIntegration(t *testing.T) {
 		t.Fatalf("get Deployment: %v", err)
 	}
 	if updatedDep.Spec.Template.Annotations != nil {
-		if _, ok := updatedDep.Spec.Template.Annotations["fortsa.scaffidi.net/restartedAt"]; ok {
+		if _, ok := updatedDep.Spec.Template.Annotations[constants.RestartedAtAnnotation]; ok {
 			t.Error("dry-run: Deployment should not have restartedAt annotation")
 		}
 	}

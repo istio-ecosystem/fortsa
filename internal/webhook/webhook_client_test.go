@@ -30,6 +30,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	"github.com/istio-ecosystem/fortsa/internal/constants"
 )
 
 func TestURLFromClientConfig(t *testing.T) {
@@ -143,7 +145,7 @@ func TestGetWebhookURLAndCABundle_PreferDefaultTag(t *testing.T) {
 	t.Run("preferDefaultTagWebhook true but istio-revision-tag-default missing", func(t *testing.T) {
 		// No default tag config; need istio-sidecar-injector for fallback
 		legacyMWC := &admissionregv1.MutatingWebhookConfiguration{
-			ObjectMeta: metav1.ObjectMeta{Name: webhookConfigPrefix},
+			ObjectMeta: metav1.ObjectMeta{Name: constants.ConfigMapNamePrefix},
 			Webhooks: []admissionregv1.MutatingWebhook{
 				{
 					ClientConfig: admissionregv1.WebhookClientConfig{
@@ -168,7 +170,7 @@ func TestGetWebhookURLAndCABundle_PreferDefaultTag(t *testing.T) {
 
 	t.Run("preferDefaultTagWebhook false uses revision-based", func(t *testing.T) {
 		legacyMWC := &admissionregv1.MutatingWebhookConfiguration{
-			ObjectMeta: metav1.ObjectMeta{Name: webhookConfigPrefix},
+			ObjectMeta: metav1.ObjectMeta{Name: constants.ConfigMapNamePrefix},
 			Webhooks: []admissionregv1.MutatingWebhook{
 				{
 					ClientConfig: admissionregv1.WebhookClientConfig{
