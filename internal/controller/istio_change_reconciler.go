@@ -143,38 +143,6 @@ func (r *IstioChangeReconciler) reconcileNamespace(ctx context.Context, namespac
 	return r.fetchTagMappingAndScan(ctx, []string{namespace})
 }
 
-// reconcileConfigMapChange lists matching ConfigMaps, refreshes the revision cache, and scans.
-// Used when istio-sidecar-injector* ConfigMaps in istio-system change.
-func (r *IstioChangeReconciler) reconcileConfigMapChange(ctx context.Context) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
-	logger.Info("Istio change, reconciling")
-
-	var cmList corev1.ConfigMapList
-	if err := r.List(ctx, &cmList, client.InNamespace(istioSystemNamespace)); err != nil {
-		logger.Error(err, "failed to list ConfigMaps")
-		return ctrl.Result{}, fmt.Errorf("list ConfigMaps in %s: %w", istioSystemNamespace, err)
-	}
-
-	r.revisionCache.ClearAll()
-	for i := range cmList.Items {
-		cm := &cmList.Items[i]
-		if !strings.HasPrefix(cm.Name, configMapNamePrefix) {
-			continue
-		}
-		vals, err := configmap.ParseConfigMapValues(cm)
-		if err != nil {
-			logger.Error(err, "failed to parse ConfigMap values", "configmap", cm.Name)
-			continue
-		}
-		r.revisionCache.Set(client.ObjectKeyFromObject(cm).String(), vals.Revision, configmap.GetConfigMapLastModified(cm))
-	}
-
-	if err := r.awaitIstiodConfigReadDelay(ctx); err != nil {
-		return ctrl.Result{}, fmt.Errorf("await istiod config read delay: %w", err)
-	}
-	return r.fetchTagMappingAndScan(ctx, nil)
-}
-
 // reconcileAll performs a full reconciliation of all istio-sidecar-injector ConfigMaps,
 // bypassing change detection. Used for periodic reconciliation only.
 func (r *IstioChangeReconciler) reconcileAll(ctx context.Context) (ctrl.Result, error) {
