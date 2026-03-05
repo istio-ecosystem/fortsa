@@ -23,7 +23,6 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -109,66 +108,29 @@ func NewIstioChangeReconciler(opts ReconcilerOptions) *IstioChangeReconciler {
 	}
 }
 
-// Reconcile implements the reconcile loop for ConfigMap events.
+// Reconcile implements the reconcile loop for ConfigMap, MWC, namespace, and periodic events.
 func (r *IstioChangeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
+	defer log.FromContext(ctx).Info("reconcile completed")
 
 	// Periodic reconciliation: full reconcile of all ConfigMaps (ticker-triggered only)
 	if req.Name == periodic.ReconcileRequestName() {
+		log.FromContext(ctx).Info("periodic reconciliation")
 		return r.reconcileAll(ctx)
 	}
 
-	// MWC tag mapping change: re-fetch tag-to-revision and scan (no ConfigMap cache refresh)
-	if req.Name == mwc.ReconcileRequestName() {
-		return r.reconcileMWCChange(ctx)
+	// ConfigMap change: list matching ConfigMaps, refresh cache, and scan
+	if req.Name == configmap.ReconcileRequestName() {
+		log.FromContext(ctx).Info("Istio change, reconciling")
+		return r.reconcileAll(ctx)
 	}
 
 	// Namespace label change: scan only pods in that namespace
 	if req.Namespace == "" && req.Name != "" {
+		log.FromContext(ctx).Info("namespace label change, scanning namespace", "namespace", req.Name)
 		return r.reconcileNamespace(ctx, req.Name)
 	}
 
-	// Only reconcile ConfigMaps in istio-system
-	if req.Namespace != istioSystemNamespace {
-		return ctrl.Result{}, nil
-	}
-
-	// Only reconcile ConfigMaps named or prefixed with istio-sidecar-injector
-	if !strings.HasPrefix(req.Name, configMapNamePrefix) {
-		return ctrl.Result{}, nil
-	}
-
-	log.FromContext(ctx).Info("reconciling ConfigMap", "namespace", req.Namespace, "name", req.Name)
-
-	var cm corev1.ConfigMap
-	if err := r.Get(ctx, req.NamespacedName, &cm); err != nil {
-		if errors.IsNotFound(err) {
-			r.revisionCache.ClearByConfigMap(req.String())
-			return ctrl.Result{}, nil
-		}
-		return ctrl.Result{}, fmt.Errorf("get ConfigMap %s: %w", req.NamespacedName, err)
-	}
-
-	vals, err := configmap.ParseConfigMapValues(&cm)
-	if err != nil {
-		logger.Error(err, "failed to parse ConfigMap values")
-		return ctrl.Result{}, fmt.Errorf("parse ConfigMap %s values: %w", req.NamespacedName, err)
-	}
-	lastModified := configmap.GetConfigMapLastModified(&cm)
-	revision := vals.Revision
-
-	if !r.revisionCache.LastModifiedChanged(revision, lastModified) {
-		return ctrl.Result{}, nil
-	}
-	r.revisionCache.Set(req.String(), revision, lastModified)
-
-	// Wait for Istiod to read the updated ConfigMap before scanning (webhook uses Istiod's config)
-	// TODO: This is a hack... We should find a better mechanism.
-	if err := r.awaitIstiodConfigReadDelay(ctx); err != nil {
-		return ctrl.Result{}, fmt.Errorf("await istiod config read delay: %w", err)
-	}
-
-	return r.fetchTagMappingAndScan(ctx, nil)
+	return ctrl.Result{}, nil
 }
 
 // reconcileNamespace performs a namespace-scoped reconciliation when Istio labels change on a namespace.
@@ -181,11 +143,32 @@ func (r *IstioChangeReconciler) reconcileNamespace(ctx context.Context, namespac
 	return r.fetchTagMappingAndScan(ctx, []string{namespace})
 }
 
-// reconcileMWCChange re-fetches the tag-to-revision mapping and scans. Used when MWCs change.
-// Does not refresh the ConfigMap cache (ConfigMaps are unchanged).
-func (r *IstioChangeReconciler) reconcileMWCChange(ctx context.Context) (ctrl.Result, error) {
+// reconcileConfigMapChange lists matching ConfigMaps, refreshes the revision cache, and scans.
+// Used when istio-sidecar-injector* ConfigMaps in istio-system change.
+func (r *IstioChangeReconciler) reconcileConfigMapChange(ctx context.Context) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-	logger.Info("MWC tag mapping changed, reconciling")
+	logger.Info("Istio change, reconciling")
+
+	var cmList corev1.ConfigMapList
+	if err := r.List(ctx, &cmList, client.InNamespace(istioSystemNamespace)); err != nil {
+		logger.Error(err, "failed to list ConfigMaps")
+		return ctrl.Result{}, fmt.Errorf("list ConfigMaps in %s: %w", istioSystemNamespace, err)
+	}
+
+	r.revisionCache.ClearAll()
+	for i := range cmList.Items {
+		cm := &cmList.Items[i]
+		if !strings.HasPrefix(cm.Name, configMapNamePrefix) {
+			continue
+		}
+		vals, err := configmap.ParseConfigMapValues(cm)
+		if err != nil {
+			logger.Error(err, "failed to parse ConfigMap values", "configmap", cm.Name)
+			continue
+		}
+		r.revisionCache.Set(client.ObjectKeyFromObject(cm).String(), vals.Revision, configmap.GetConfigMapLastModified(cm))
+	}
+
 	if err := r.awaitIstiodConfigReadDelay(ctx); err != nil {
 		return ctrl.Result{}, fmt.Errorf("await istiod config read delay: %w", err)
 	}
@@ -196,7 +179,7 @@ func (r *IstioChangeReconciler) reconcileMWCChange(ctx context.Context) (ctrl.Re
 // bypassing change detection. Used for periodic reconciliation only.
 func (r *IstioChangeReconciler) reconcileAll(ctx context.Context) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-	logger.Info("periodic reconciliation of all istio-sidecar-injector ConfigMaps")
+	logger.Info("scanning all pods")
 
 	var cmList corev1.ConfigMapList
 	if err := r.List(ctx, &cmList, client.InNamespace(istioSystemNamespace)); err != nil {
@@ -204,7 +187,7 @@ func (r *IstioChangeReconciler) reconcileAll(ctx context.Context) (ctrl.Result, 
 		return ctrl.Result{}, fmt.Errorf("list ConfigMaps in %s: %w", istioSystemNamespace, err)
 	}
 
-	// Update cache from all matching ConfigMaps
+	r.revisionCache.ClearAll()
 	for i := range cmList.Items {
 		cm := &cmList.Items[i]
 		if !strings.HasPrefix(cm.Name, configMapNamePrefix) {
@@ -287,17 +270,5 @@ func (r *IstioChangeReconciler) annotateWorkloadsWithDelay(ctx context.Context, 
 			// currently only happens due to cooldown period.
 			logger.Info("skipped annotating workload for restart", "namespace", ref.Namespace, "name", ref.Name, "kind", ref.Kind)
 		}
-	}
-}
-
-// ConfigMapFilter returns a predicate that filters ConfigMaps to only those
-// in istio-system with name equal to or prefixed with istio-sidecar-injector.
-func ConfigMapFilter() func(client.Object) bool {
-	return func(obj client.Object) bool {
-		if obj.GetNamespace() != istioSystemNamespace {
-			return false
-		}
-		name := obj.GetName()
-		return strings.HasPrefix(name, configMapNamePrefix)
 	}
 }

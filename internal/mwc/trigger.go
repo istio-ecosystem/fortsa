@@ -31,7 +31,7 @@ import (
 const (
 	istioRevisionTagPrefix  = "istio-revision-tag-"
 	istioSystemNamespace    = "istio-system"
-	mwcReconcileTriggerName = "__mwc_reconcile__"
+	mwcReconcileTriggerName = "__istio_change__"
 )
 
 // ReconcileRequest returns a reconcile.Request that triggers a tag-mapping reconciliation
