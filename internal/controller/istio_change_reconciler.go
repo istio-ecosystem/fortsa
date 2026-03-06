@@ -129,6 +129,11 @@ func (r *IstioChangeReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 // When limitToNamespaces is nil, scans all namespaces; when non-nil, restricts scanning to those namespaces.
 func (r *IstioChangeReconciler) reconcileAll(ctx context.Context, limitToNamespaces []string) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
+
+	if err := r.awaitIstiodConfigReadDelay(ctx); err != nil {
+		return ctrl.Result{}, fmt.Errorf("await istiod config read delay: %w", err)
+	}
+
 	if limitToNamespaces != nil {
 		logger.Info("scanning namespaces", "namespaces", limitToNamespaces)
 	} else {
@@ -158,9 +163,6 @@ func (r *IstioChangeReconciler) reconcileAll(ctx context.Context, limitToNamespa
 		}
 	}
 
-	if err := r.awaitIstiodConfigReadDelay(ctx); err != nil {
-		return ctrl.Result{}, fmt.Errorf("await istiod config read delay: %w", err)
-	}
 	return r.fetchTagMappingAndScan(ctx, lastModifiedByRevision, limitToNamespaces)
 }
 
