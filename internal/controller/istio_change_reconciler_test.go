@@ -178,13 +178,13 @@ func TestIstioChangeReconciler_Reconcile_ConfigMapTrigger(t *testing.T) {
 		}
 	})
 
-	t.Run("unknown request returns no-op", func(t *testing.T) {
+	t.Run("unknown request logs error and returns no-op", func(t *testing.T) {
 		fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(validCM).Build()
 		r := NewIstioChangeReconciler(ReconcilerOptions{Client: fakeClient, Scheme: scheme})
 		req := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "unknown"}}
 		result, err := r.Reconcile(context.Background(), req)
 		if err != nil {
-			t.Fatalf("Reconcile(unknown): %v", err)
+			t.Fatalf("Reconcile(unknown): expected no error (request ignored): %v", err)
 		}
 		if result.RequeueAfter > 0 {
 			t.Error("unknown request should not requeue")
