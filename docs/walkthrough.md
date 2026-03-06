@@ -60,16 +60,14 @@ Fortsa reads the Istio sidecar injector ConfigMap data at `data["values"]` (JSON
 
 It also computes a “last modified” timestamp for each ConfigMap using managed fields timestamps when available (falling back to creation timestamp). This timestamp feeds pod skip logic: pods created after the config change plus `--istiod-config-read-delay` are skipped (they may already have the correct sidecar).
 
-### 5) Cache state: `RevisionCache` (`internal/cache`)
+### 5) lastModifiedByRevision for pod skip logic
 
-The reconciler maintains a process-local cache used for pod skip logic:
+The reconciler builds `revision -> lastModified` from the current istio-sidecar-injector ConfigMaps and passes it to the scanner. Pods created after config change + delay are skipped.
 
-- `revision -> lastModified`: passed to the scanner via `GetCopy()`; pods created after config change + delay are skipped.
-- `configMapKey -> revision`: cleared and repopulated on each `reconcileAll()`; ensures deleted ConfigMaps no longer appear in the cache.
+- **reconcileAll**: Builds the map inline from the ConfigMap list.
+- **reconcileNamespace**: Calls `configmap.BuildLastModifiedByRevision` to list ConfigMaps and build the map.
 
-On each ConfigMap, MWC, or periodic-triggered reconcile, the cache is cleared and repopulated from the current ConfigMap list before scanning. There is no per-ConfigMap change check in the reconcile path; deduplication comes from the shared request name `__istio_change__`, which causes multiple watch events to coalesce into one reconcile.
-
-This cache is guarded by a mutex because reconciles can run concurrently.
+Deduplication comes from the shared request name `__istio_change__`, which causes multiple watch events to coalesce into one reconcile.
 
 ### 6) Tag mapping: tag -> revision and tag last-modified (`internal/mwc`)
 

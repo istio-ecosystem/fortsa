@@ -29,7 +29,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/istio-ecosystem/fortsa/internal/annotator"
-	"github.com/istio-ecosystem/fortsa/internal/cache"
 	"github.com/istio-ecosystem/fortsa/internal/configmap"
 	"github.com/istio-ecosystem/fortsa/internal/constants"
 	"github.com/istio-ecosystem/fortsa/internal/mwc"
@@ -84,8 +83,6 @@ type IstioChangeReconciler struct {
 	restartDelay          time.Duration
 	istiodConfigReadDelay time.Duration
 	skipNamespaces        []string
-
-	revisionCache *cache.RevisionCache
 }
 
 // NewIstioChangeReconciler creates a new IstioChangeReconciler from the given options.
@@ -100,7 +97,6 @@ func NewIstioChangeReconciler(opts ReconcilerOptions) *IstioChangeReconciler {
 		restartDelay:          opts.RestartDelay,
 		istiodConfigReadDelay: opts.IstiodConfigReadDelay,
 		skipNamespaces:        opts.SkipNamespaces,
-		revisionCache:         cache.NewRevisionCache(),
 	}
 }
 
@@ -133,10 +129,15 @@ func (r *IstioChangeReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 func (r *IstioChangeReconciler) reconcileNamespace(ctx context.Context, namespace string) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("reconciling namespace (Istio label change)", "namespace", namespace)
+	lastModifiedByRevision, err := configmap.BuildLastModifiedByRevision(ctx, r.Client)
+	if err != nil {
+		logger.Error(err, "failed to build lastModifiedByRevision")
+		return ctrl.Result{}, fmt.Errorf("build lastModifiedByRevision: %w", err)
+	}
 	if err := r.awaitIstiodConfigReadDelay(ctx); err != nil {
 		return ctrl.Result{}, fmt.Errorf("await istiod config read delay: %w", err)
 	}
-	return r.fetchTagMappingAndScan(ctx, []string{namespace})
+	return r.fetchTagMappingAndScan(ctx, lastModifiedByRevision, []string{namespace})
 }
 
 // reconcileAll performs a full reconciliation of all istio-sidecar-injector ConfigMaps,
@@ -151,7 +152,7 @@ func (r *IstioChangeReconciler) reconcileAll(ctx context.Context) (ctrl.Result, 
 		return ctrl.Result{}, fmt.Errorf("list ConfigMaps in %s: %w", constants.IstioSystemNamespace, err)
 	}
 
-	r.revisionCache.ClearAll()
+	lastModifiedByRevision := make(map[string]time.Time)
 	for i := range cmList.Items {
 		cm := &cmList.Items[i]
 		if !strings.HasPrefix(cm.Name, constants.ConfigMapNamePrefix) {
@@ -160,38 +161,42 @@ func (r *IstioChangeReconciler) reconcileAll(ctx context.Context) (ctrl.Result, 
 		vals, err := configmap.ParseConfigMapValues(cm)
 		if err != nil {
 			logger.Error(err, "failed to parse ConfigMap values", "configmap", cm.Name)
-			// Partial success: skip invalid ConfigMap, continue with others.
 			continue
 		}
-		r.revisionCache.Set(client.ObjectKeyFromObject(cm).String(), vals.Revision, configmap.GetConfigMapLastModified(cm))
+		lastModified := configmap.GetConfigMapLastModified(cm)
+		if existing, ok := lastModifiedByRevision[vals.Revision]; !ok || lastModified.After(existing) {
+			lastModifiedByRevision[vals.Revision] = lastModified
+		}
 	}
 
 	if err := r.awaitIstiodConfigReadDelay(ctx); err != nil {
 		return ctrl.Result{}, fmt.Errorf("await istiod config read delay: %w", err)
 	}
-	return r.fetchTagMappingAndScan(ctx, nil)
+	return r.fetchTagMappingAndScan(ctx, lastModifiedByRevision, nil)
 }
 
 // fetchTagMappingAndScan fetches tag-to-revision and lastModifiedByTag from MWCs, then scans and annotates.
 // limitToNamespaces, when non-empty, restricts scanning to those namespaces only (e.g. for namespace label changes).
-func (r *IstioChangeReconciler) fetchTagMappingAndScan(ctx context.Context, limitToNamespaces []string) (ctrl.Result, error) {
+func (r *IstioChangeReconciler) fetchTagMappingAndScan(ctx context.Context, lastModifiedByRevision map[string]time.Time, limitToNamespaces []string) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	tagToRevision, lastModifiedByTag, err := mwc.FetchTagToRevisionAndLastModified(ctx, r.Client)
 	if err != nil {
 		logger.Error(err, "failed to fetch tag-to-revision mapping")
 		return ctrl.Result{}, fmt.Errorf("fetch tag-to-revision mapping: %w", err)
 	}
-	return r.scanAndAnnotate(ctx, tagToRevision, lastModifiedByTag, limitToNamespaces)
+	return r.scanAndAnnotate(ctx, lastModifiedByRevision, tagToRevision, lastModifiedByTag, limitToNamespaces)
 }
 
-// scanAndAnnotate scans for outdated pods using the current cache and annotates workloads to trigger restarts.
+// scanAndAnnotate scans for outdated pods and annotates workloads to trigger restarts.
 // limitToNamespaces, when non-empty, restricts scanning to those namespaces only.
-func (r *IstioChangeReconciler) scanAndAnnotate(ctx context.Context, tagToRevision map[string]string, lastModifiedByTag map[string]time.Time, limitToNamespaces []string) (ctrl.Result, error) {
+func (r *IstioChangeReconciler) scanAndAnnotate(ctx context.Context, lastModifiedByRevision map[string]time.Time, tagToRevision map[string]string, lastModifiedByTag map[string]time.Time, limitToNamespaces []string) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	if tagToRevision == nil {
 		tagToRevision = map[string]string{}
 	}
-	lastModifiedByRevision := r.revisionCache.GetCopy()
+	if lastModifiedByRevision == nil {
+		lastModifiedByRevision = map[string]time.Time{}
+	}
 	opts := podscanner.ScanOptions{
 		CompareHub:            r.compareHub,
 		IstiodConfigReadDelay: r.istiodConfigReadDelay,
