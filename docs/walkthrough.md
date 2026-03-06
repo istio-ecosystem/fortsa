@@ -64,8 +64,7 @@ It also computes a “last modified” timestamp for each ConfigMap using manage
 
 The reconciler builds `revision -> lastModified` from the current istio-sidecar-injector ConfigMaps and passes it to the scanner. Pods created after config change + delay are skipped.
 
-- **reconcileAll**: Builds the map inline from the ConfigMap list.
-- **reconcileNamespace**: Calls `configmap.BuildLastModifiedByRevision` to list ConfigMaps and build the map.
+- **reconcileAll**: Builds the map inline from the ConfigMap list. When limitToNamespaces is nil, scans all namespaces; when non-nil, restricts to those namespaces.
 
 Deduplication comes from the shared request name `__istio_change__`, which causes multiple watch events to coalesce into one reconcile.
 

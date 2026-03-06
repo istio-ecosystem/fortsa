@@ -117,12 +117,11 @@ flowchart TD
     Reconcile --> CheckName{Request.Name?}
     CheckName -->|"__periodic_reconcile__"| ReconcileAll[reconcileAll]
     CheckName -->|"__istio_change__"| ReconcileAll
-    CheckName -->|Namespace only| ReconcileNS[reconcileNamespace]
+    CheckName -->|Namespace only| ReconcileAllNS[reconcileAll with namespaces]
     CheckName -->|Other| Return[Return]
     ReconcileAll --> BuildRev[Build lastModifiedByRevision from ConfigMaps]
+    ReconcileAllNS --> BuildRev
     BuildRev --> AwaitDelay[awaitIstiodConfigReadDelay]
-    ReconcileNS --> BuildRevNS[Build lastModifiedByRevision from ConfigMaps]
-    BuildRevNS --> AwaitDelay
     AwaitDelay --> FetchTag[fetchTagMappingAndScan]
     FetchTag --> ScanAnnotate[scanAndAnnotate]
     ScanAnnotate --> AnnotateDelay[annotateWorkloadsWithDelay]
@@ -134,7 +133,7 @@ flowchart TD
 | ------- | ------- | ------- |
 | `__periodic_reconcile__` | Periodic ticker | `reconcileAll()` — full scan of all ConfigMaps |
 | `__istio_change__` | ConfigMap or MWC change | `reconcileAll()` — clear cache, repopulate, delay, scan |
-| Namespace-only (req.Name = namespace, req.Namespace empty) | Namespace label change | `reconcileNamespace()` — scan only that namespace |
+| Namespace-only (req.Name = namespace, req.Namespace empty) | Namespace label change | `reconcileAll(ctx, []string{namespace})` — scan only that namespace |
 
 ConfigMap and MWC watches both enqueue the same request name `__istio_change__`. Controller-runtime deduplicates by NamespacedName, so multiple rapid events coalesce into a single reconcile run.
 
@@ -227,7 +226,6 @@ flowchart TD
 
 The reconciler builds `lastModifiedByRevision` (revision -> ConfigMap LastModified) from the current istio-sidecar-injector ConfigMaps and passes it to the pod scanner for skip logic. Pods created after config change + IstiodConfigReadDelay are skipped (they may already have the correct sidecar).
 
-- **reconcileAll**: Builds the map inline from the ConfigMap list before scanning.
-- **reconcileNamespace**: Calls [configmap.BuildLastModifiedByRevision](internal/configmap/fetch.go) to list ConfigMaps and build the map before scanning.
+- **reconcileAll**: Builds the map inline from the ConfigMap list before scanning. When limitToNamespaces is nil, scans all namespaces; when non-nil, restricts to those namespaces.
 
 Deduplication comes from the shared request name `__istio_change__`: multiple ConfigMap and MWC watch events coalesce into one reconcile before the workqueue processes them.

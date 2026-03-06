@@ -107,44 +107,33 @@ func (r *IstioChangeReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	// Periodic reconciliation: full reconcile of all ConfigMaps (ticker-triggered only)
 	if req.Name == periodic.ReconcileRequestName() {
 		log.FromContext(ctx).Info("periodic reconciliation")
-		return r.reconcileAll(ctx)
+		return r.reconcileAll(ctx, nil)
 	}
 
 	// ConfigMap change: list matching ConfigMaps, refresh cache, and scan
 	if req.Name == configmap.ReconcileRequestName() {
 		log.FromContext(ctx).Info("Istio change, reconciling")
-		return r.reconcileAll(ctx)
+		return r.reconcileAll(ctx, nil)
 	}
 
 	// Namespace label change: scan only pods in that namespace
 	if req.Namespace == "" && req.Name != "" {
 		log.FromContext(ctx).Info("namespace label change, scanning namespace", "namespace", req.Name)
-		return r.reconcileNamespace(ctx, req.Name)
+		return r.reconcileAll(ctx, []string{req.Name})
 	}
 
 	return ctrl.Result{}, nil
 }
 
-// reconcileNamespace performs a namespace-scoped reconciliation when Istio labels change on a namespace.
-func (r *IstioChangeReconciler) reconcileNamespace(ctx context.Context, namespace string) (ctrl.Result, error) {
+// reconcileAll performs a full reconciliation of istio-sidecar-injector ConfigMaps.
+// When limitToNamespaces is nil, scans all namespaces; when non-nil, restricts scanning to those namespaces.
+func (r *IstioChangeReconciler) reconcileAll(ctx context.Context, limitToNamespaces []string) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-	logger.Info("reconciling namespace (Istio label change)", "namespace", namespace)
-	lastModifiedByRevision, err := configmap.BuildLastModifiedByRevision(ctx, r.Client)
-	if err != nil {
-		logger.Error(err, "failed to build lastModifiedByRevision")
-		return ctrl.Result{}, fmt.Errorf("build lastModifiedByRevision: %w", err)
+	if limitToNamespaces != nil {
+		logger.Info("scanning namespaces", "namespaces", limitToNamespaces)
+	} else {
+		logger.Info("scanning all pods")
 	}
-	if err := r.awaitIstiodConfigReadDelay(ctx); err != nil {
-		return ctrl.Result{}, fmt.Errorf("await istiod config read delay: %w", err)
-	}
-	return r.fetchTagMappingAndScan(ctx, lastModifiedByRevision, []string{namespace})
-}
-
-// reconcileAll performs a full reconciliation of all istio-sidecar-injector ConfigMaps,
-// bypassing change detection. Used for periodic reconciliation only.
-func (r *IstioChangeReconciler) reconcileAll(ctx context.Context) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
-	logger.Info("scanning all pods")
 
 	var cmList corev1.ConfigMapList
 	if err := r.List(ctx, &cmList, client.InNamespace(constants.IstioSystemNamespace)); err != nil {
@@ -172,7 +161,7 @@ func (r *IstioChangeReconciler) reconcileAll(ctx context.Context) (ctrl.Result, 
 	if err := r.awaitIstiodConfigReadDelay(ctx); err != nil {
 		return ctrl.Result{}, fmt.Errorf("await istiod config read delay: %w", err)
 	}
-	return r.fetchTagMappingAndScan(ctx, lastModifiedByRevision, nil)
+	return r.fetchTagMappingAndScan(ctx, lastModifiedByRevision, limitToNamespaces)
 }
 
 // fetchTagMappingAndScan fetches tag-to-revision and lastModifiedByTag from MWCs, then scans and annotates.
