@@ -126,6 +126,7 @@ func (r *IstioChangeReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return r.reconcileNamespace(ctx, req.Name)
 	}
 
+	log.FromContext(ctx).Error(fmt.Errorf("unhandled reconciliation trigger: %+v", req), "ignoring request")
 	return ctrl.Result{}, nil
 }
 
