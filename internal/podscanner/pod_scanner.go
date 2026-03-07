@@ -31,13 +31,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"github.com/istio-ecosystem/fortsa/internal/configmap"
 	"github.com/istio-ecosystem/fortsa/internal/constants"
 	"github.com/istio-ecosystem/fortsa/internal/webhook"
 )
 
 const (
 	istioProxyContainerName = "istio-proxy"
+	dnsSubdomainMaxLen      = 63
+	podNameSuffix           = "-fortsa2-check"
 )
 
 // ParsedImage holds the components of a container image reference.
@@ -73,15 +74,6 @@ func ParseImage(image string) ParsedImage {
 	}
 
 	return p
-}
-
-// Matches returns true if the parsed container image matches the expected Istio values.
-// When compareHub is true, registry must match hub; when false, only image name and tag are compared.
-func (p ParsedImage) Matches(vals *configmap.IstioValues, compareHub bool) bool {
-	if compareHub && p.Registry != vals.Hub {
-		return false
-	}
-	return p.ImageName == vals.Image && p.Tag == vals.Tag
 }
 
 // imagesMatch returns true if current and expected images match.
@@ -173,6 +165,229 @@ func shouldSkipPodForLastModified(pod *corev1.Pod, revision, revOrTag string, la
 	}
 	effectiveWithDelay := effectiveLastModified.Add(opts.IstiodConfigReadDelay)
 	return !pod.CreationTimestamp.Time.Before(effectiveWithDelay)
+}
+
+func getIstioProxyImage(pod *corev1.Pod) string {
+	// Check regular containers (traditional Istio sidecar injection)
+	for i := range pod.Spec.Containers {
+		if pod.Spec.Containers[i].Name == istioProxyContainerName {
+			return pod.Spec.Containers[i].Image
+		}
+	}
+	// Check init containers (Kubernetes native sidecars: istio-proxy in initContainers with restartPolicy: Always)
+	for i := range pod.Spec.InitContainers {
+		if pod.Spec.InitContainers[i].Name == istioProxyContainerName {
+			return pod.Spec.InitContainers[i].Image
+		}
+	}
+	return ""
+}
+
+func (s *PodScanner) resolveOwner(ctx context.Context, obj metav1.Object, owner *metav1.OwnerReference) (*WorkloadRef, error) {
+	nn := types.NamespacedName{
+		Namespace: obj.GetNamespace(),
+		Name:      owner.Name,
+	}
+
+	switch owner.Kind {
+	case "Deployment": //nolint:goconst
+		var dep appsv1.Deployment
+		if err := s.client.Get(ctx, nn, &dep); err != nil {
+			if errors.IsNotFound(err) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		return &WorkloadRef{NamespacedName: nn, Kind: "Deployment"}, nil
+
+	case "StatefulSet":
+		var sts appsv1.StatefulSet
+		if err := s.client.Get(ctx, nn, &sts); err != nil {
+			if errors.IsNotFound(err) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		return &WorkloadRef{NamespacedName: nn, Kind: "StatefulSet"}, nil
+
+	case "DaemonSet":
+		var ds appsv1.DaemonSet
+		if err := s.client.Get(ctx, nn, &ds); err != nil {
+			if errors.IsNotFound(err) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		return &WorkloadRef{NamespacedName: nn, Kind: "DaemonSet"}, nil
+
+	case "ReplicaSet", "ControllerRevision":
+		// Recurse: fetch the owner and follow its ownerReferences
+		var nextObj runtime.Object
+		switch owner.Kind {
+		case "ReplicaSet":
+			var rs appsv1.ReplicaSet
+			if err := s.client.Get(ctx, nn, &rs); err != nil {
+				if errors.IsNotFound(err) {
+					return nil, nil
+				}
+				return nil, err
+			}
+			nextObj = &rs
+		case "ControllerRevision":
+			// ControllerRevision is unstructured in apps/v1; we need to get it
+			// and check its ownerReferences. ControllerRevision is in apps/v1.
+			var cr appsv1.ControllerRevision
+			if err := s.client.Get(ctx, nn, &cr); err != nil {
+				if errors.IsNotFound(err) {
+					return nil, nil
+				}
+				return nil, err
+			}
+			nextObj = &cr
+		}
+
+		return s.findWorkloadOwner(ctx, nextObj.(metav1.Object))
+	}
+
+	return nil, nil
+}
+
+// findWorkloadOwner recursively follows ownerReferences to find a Deployment,
+// StatefulSet, or DaemonSet. Returns nil if none found.
+func (s *PodScanner) findWorkloadOwner(ctx context.Context, obj metav1.Object) (*WorkloadRef, error) {
+	owners := obj.GetOwnerReferences()
+	if len(owners) == 0 {
+		return nil, nil
+	}
+
+	// Use the first controller owner (Kubernetes typically has one)
+	for _, owner := range owners {
+		if owner.Controller == nil || !*owner.Controller {
+			continue
+		}
+
+		ref, err := s.resolveOwner(ctx, obj, &owner)
+		if err != nil {
+			return nil, err
+		}
+		if ref != nil {
+			return ref, nil
+		}
+	}
+
+	return nil, nil
+}
+
+// getIstioRevFromWorkloadOrNamespace returns istio.io/rev from the workload's pod template;
+// if missing, from the namespace (istio.io/rev or istio-injection=enabled). Returns "default"
+// when namespace has istio-injection=enabled. Returns "" when neither workload nor namespace
+// has istio.io/rev and namespace lacks istio-injection=enabled (caller should skip the pod).
+func (s *PodScanner) getIstioRevFromWorkloadOrNamespace(ctx context.Context, ref *WorkloadRef) (string, error) {
+	switch ref.Kind {
+	case "Deployment": //nolint:goconst
+		var dep appsv1.Deployment
+		if err := s.client.Get(ctx, ref.NamespacedName, &dep); err != nil {
+			return "", err
+		}
+		if v, ok := dep.Spec.Template.Labels[constants.LabelIstioRev]; ok && v != "" {
+			return v, nil
+		}
+		// Template has no istio.io/rev; continue to namespace check below
+	case "StatefulSet": //nolint:goconst
+		var sts appsv1.StatefulSet
+		if err := s.client.Get(ctx, ref.NamespacedName, &sts); err != nil {
+			return "", err
+		}
+		if v, ok := sts.Spec.Template.Labels[constants.LabelIstioRev]; ok && v != "" {
+			return v, nil
+		}
+		// Template has no istio.io/rev; continue to namespace check below
+	case "DaemonSet": //nolint:goconst
+		var ds appsv1.DaemonSet
+		if err := s.client.Get(ctx, ref.NamespacedName, &ds); err != nil {
+			return "", err
+		}
+		if v, ok := ds.Spec.Template.Labels[constants.LabelIstioRev]; ok && v != "" {
+			return v, nil
+		}
+		// Template has no istio.io/rev; continue to namespace check below
+	default:
+		//nolint:goconst
+		return "default", nil
+	}
+
+	var ns corev1.Namespace
+	if err := s.client.Get(ctx, types.NamespacedName{Name: ref.Namespace}, &ns); err != nil {
+		return "", err
+	}
+	if v, ok := ns.Labels[constants.LabelIstioRev]; ok && v != "" {
+		return v, nil
+	}
+	if v, ok := ns.Labels[constants.LabelIstioInjection]; ok && v == "enabled" {
+		//nolint:goconst
+		return "default", nil
+	}
+	return "", nil
+}
+
+// buildPodFromWorkload fetches the workload and builds a Pod from its template.
+func (s *PodScanner) buildPodFromWorkload(ctx context.Context, ref *WorkloadRef) (*corev1.Pod, error) {
+	nn := ref.NamespacedName
+	// Default to a placeholder name; the webhook doesn't require a real pod name.
+	name := "fortsa2-check"
+	if nn.Name != "" {
+		if len(nn.Name) > dnsSubdomainMaxLen-len(podNameSuffix) {
+			name = nn.Name[:dnsSubdomainMaxLen-len(podNameSuffix)]
+		}
+		name = name + podNameSuffix
+	}
+
+	switch ref.Kind {
+	case "Deployment":
+		var dep appsv1.Deployment
+		if err := s.client.Get(ctx, nn, &dep); err != nil {
+			return nil, err
+		}
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace:   nn.Namespace,
+				Name:        name,
+				Labels:      dep.Spec.Template.Labels,
+				Annotations: dep.Spec.Template.Annotations,
+			},
+			Spec: dep.Spec.Template.Spec,
+		}, nil
+	case "StatefulSet":
+		var sts appsv1.StatefulSet
+		if err := s.client.Get(ctx, nn, &sts); err != nil {
+			return nil, err
+		}
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace:   nn.Namespace,
+				Name:        name,
+				Labels:      sts.Spec.Template.Labels,
+				Annotations: sts.Spec.Template.Annotations,
+			},
+			Spec: sts.Spec.Template.Spec,
+		}, nil
+	case "DaemonSet":
+		var ds appsv1.DaemonSet
+		if err := s.client.Get(ctx, nn, &ds); err != nil {
+			return nil, err
+		}
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace:   nn.Namespace,
+				Name:        name,
+				Labels:      ds.Spec.Template.Labels,
+				Annotations: ds.Spec.Template.Annotations,
+			},
+			Spec: ds.Spec.Template.Spec,
+		}, nil
+	default:
+		return nil, nil
+	}
 }
 
 // processPodForOutdatedSidecar checks a single pod for an outdated Istio sidecar. Returns the
@@ -294,231 +509,4 @@ func (s *PodScanner) ScanOutdatedPods(ctx context.Context, lastModifiedByRevisio
 	}
 
 	return workloads, nil
-}
-
-// getIstioRevFromWorkloadOrNamespace returns istio.io/rev from the workload's pod template;
-// if missing, from the namespace (istio.io/rev or istio-injection=enabled). Returns "default"
-// when namespace has istio-injection=enabled. Returns "" when neither workload nor namespace
-// has istio.io/rev and namespace lacks istio-injection=enabled (caller should skip the pod).
-func (s *PodScanner) getIstioRevFromWorkloadOrNamespace(ctx context.Context, ref *WorkloadRef) (string, error) {
-	switch ref.Kind {
-	case "Deployment": //nolint:goconst
-		var dep appsv1.Deployment
-		if err := s.client.Get(ctx, ref.NamespacedName, &dep); err != nil {
-			return "", err
-		}
-		if v, ok := dep.Spec.Template.Labels[constants.LabelIstioRev]; ok && v != "" {
-			return v, nil
-		}
-		// Template has no istio.io/rev; continue to namespace check below
-	case "StatefulSet": //nolint:goconst
-		var sts appsv1.StatefulSet
-		if err := s.client.Get(ctx, ref.NamespacedName, &sts); err != nil {
-			return "", err
-		}
-		if v, ok := sts.Spec.Template.Labels[constants.LabelIstioRev]; ok && v != "" {
-			return v, nil
-		}
-		// Template has no istio.io/rev; continue to namespace check below
-	case "DaemonSet": //nolint:goconst
-		var ds appsv1.DaemonSet
-		if err := s.client.Get(ctx, ref.NamespacedName, &ds); err != nil {
-			return "", err
-		}
-		if v, ok := ds.Spec.Template.Labels[constants.LabelIstioRev]; ok && v != "" {
-			return v, nil
-		}
-		// Template has no istio.io/rev; continue to namespace check below
-	default:
-		//nolint:goconst
-		return "default", nil
-	}
-
-	var ns corev1.Namespace
-	if err := s.client.Get(ctx, types.NamespacedName{Name: ref.Namespace}, &ns); err != nil {
-		return "", err
-	}
-	if v, ok := ns.Labels[constants.LabelIstioRev]; ok && v != "" {
-		return v, nil
-	}
-	if v, ok := ns.Labels[constants.LabelIstioInjection]; ok && v == "enabled" {
-		//nolint:goconst
-		return "default", nil
-	}
-	return "", nil
-}
-
-// dnsSubdomainMaxLen is the max length for Kubernetes DNS subdomain names (e.g. pod names).
-const dnsSubdomainMaxLen = 63
-const podNameSuffix = "-fortsa2-check"
-
-// buildPodFromWorkload fetches the workload and builds a Pod from its template.
-func (s *PodScanner) buildPodFromWorkload(ctx context.Context, ref *WorkloadRef) (*corev1.Pod, error) {
-	nn := ref.NamespacedName
-	// Default to a placeholder name; the webhook doesn't require a real pod name.
-	name := "fortsa2-check"
-	if nn.Name != "" {
-		if len(nn.Name) > dnsSubdomainMaxLen-len(podNameSuffix) {
-			name = nn.Name[:dnsSubdomainMaxLen-len(podNameSuffix)]
-		}
-		name = name + podNameSuffix
-	}
-
-	switch ref.Kind {
-	case "Deployment":
-		var dep appsv1.Deployment
-		if err := s.client.Get(ctx, nn, &dep); err != nil {
-			return nil, err
-		}
-		return &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace:   nn.Namespace,
-				Name:        name,
-				Labels:      dep.Spec.Template.Labels,
-				Annotations: dep.Spec.Template.Annotations,
-			},
-			Spec: dep.Spec.Template.Spec,
-		}, nil
-	case "StatefulSet":
-		var sts appsv1.StatefulSet
-		if err := s.client.Get(ctx, nn, &sts); err != nil {
-			return nil, err
-		}
-		return &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace:   nn.Namespace,
-				Name:        name,
-				Labels:      sts.Spec.Template.Labels,
-				Annotations: sts.Spec.Template.Annotations,
-			},
-			Spec: sts.Spec.Template.Spec,
-		}, nil
-	case "DaemonSet":
-		var ds appsv1.DaemonSet
-		if err := s.client.Get(ctx, nn, &ds); err != nil {
-			return nil, err
-		}
-		return &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace:   nn.Namespace,
-				Name:        name,
-				Labels:      ds.Spec.Template.Labels,
-				Annotations: ds.Spec.Template.Annotations,
-			},
-			Spec: ds.Spec.Template.Spec,
-		}, nil
-	default:
-		return nil, nil
-	}
-}
-
-func getIstioProxyImage(pod *corev1.Pod) string {
-	// Check regular containers (traditional Istio sidecar injection)
-	for i := range pod.Spec.Containers {
-		if pod.Spec.Containers[i].Name == istioProxyContainerName {
-			return pod.Spec.Containers[i].Image
-		}
-	}
-	// Check init containers (Kubernetes native sidecars: istio-proxy in initContainers with restartPolicy: Always)
-	for i := range pod.Spec.InitContainers {
-		if pod.Spec.InitContainers[i].Name == istioProxyContainerName {
-			return pod.Spec.InitContainers[i].Image
-		}
-	}
-	return ""
-}
-
-// findWorkloadOwner recursively follows ownerReferences to find a Deployment,
-// StatefulSet, or DaemonSet. Returns nil if none found.
-func (s *PodScanner) findWorkloadOwner(ctx context.Context, obj metav1.Object) (*WorkloadRef, error) {
-	owners := obj.GetOwnerReferences()
-	if len(owners) == 0 {
-		return nil, nil
-	}
-
-	// Use the first controller owner (Kubernetes typically has one)
-	for _, owner := range owners {
-		if owner.Controller == nil || !*owner.Controller {
-			continue
-		}
-
-		ref, err := s.resolveOwner(ctx, obj, &owner)
-		if err != nil {
-			return nil, err
-		}
-		if ref != nil {
-			return ref, nil
-		}
-	}
-
-	return nil, nil
-}
-
-func (s *PodScanner) resolveOwner(ctx context.Context, obj metav1.Object, owner *metav1.OwnerReference) (*WorkloadRef, error) {
-	nn := types.NamespacedName{
-		Namespace: obj.GetNamespace(),
-		Name:      owner.Name,
-	}
-
-	switch owner.Kind {
-	case "Deployment":
-		var dep appsv1.Deployment
-		if err := s.client.Get(ctx, nn, &dep); err != nil {
-			if errors.IsNotFound(err) {
-				return nil, nil
-			}
-			return nil, err
-		}
-		return &WorkloadRef{NamespacedName: nn, Kind: "Deployment"}, nil
-
-	case "StatefulSet":
-		var sts appsv1.StatefulSet
-		if err := s.client.Get(ctx, nn, &sts); err != nil {
-			if errors.IsNotFound(err) {
-				return nil, nil
-			}
-			return nil, err
-		}
-		return &WorkloadRef{NamespacedName: nn, Kind: "StatefulSet"}, nil
-
-	case "DaemonSet":
-		var ds appsv1.DaemonSet
-		if err := s.client.Get(ctx, nn, &ds); err != nil {
-			if errors.IsNotFound(err) {
-				return nil, nil
-			}
-			return nil, err
-		}
-		return &WorkloadRef{NamespacedName: nn, Kind: "DaemonSet"}, nil
-
-	case "ReplicaSet", "ControllerRevision":
-		// Recurse: fetch the owner and follow its ownerReferences
-		var nextObj runtime.Object
-		switch owner.Kind {
-		case "ReplicaSet":
-			var rs appsv1.ReplicaSet
-			if err := s.client.Get(ctx, nn, &rs); err != nil {
-				if errors.IsNotFound(err) {
-					return nil, nil
-				}
-				return nil, err
-			}
-			nextObj = &rs
-		case "ControllerRevision":
-			// ControllerRevision is unstructured in apps/v1; we need to get it
-			// and check its ownerReferences. ControllerRevision is in apps/v1.
-			var cr appsv1.ControllerRevision
-			if err := s.client.Get(ctx, nn, &cr); err != nil {
-				if errors.IsNotFound(err) {
-					return nil, nil
-				}
-				return nil, err
-			}
-			nextObj = &cr
-		}
-
-		return s.findWorkloadOwner(ctx, nextObj.(metav1.Object))
-	}
-
-	return nil, nil
 }

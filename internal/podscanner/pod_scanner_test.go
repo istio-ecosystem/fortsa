@@ -26,8 +26,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-
-	"github.com/istio-ecosystem/fortsa/internal/configmap"
 )
 
 // fakeWebhookCaller returns a mutated pod with the given istio-proxy image.
@@ -75,36 +73,6 @@ func TestParseImage(t *testing.T) {
 			if p.Registry != tt.wantReg || p.ImageName != tt.wantName || p.Tag != tt.wantTag {
 				t.Errorf("ParseImage(%q) = %+v, want Registry=%q ImageName=%q Tag=%q",
 					tt.image, p, tt.wantReg, tt.wantName, tt.wantTag)
-			}
-		})
-	}
-}
-
-func TestParsedImage_Matches(t *testing.T) {
-	vals := &configmap.IstioValues{Hub: "docker.io/istio", Tag: "1.20.1", Image: "proxyv2"}
-	tests := []struct {
-		image      string
-		compareHub bool
-		want       bool
-	}{
-		{"docker.io/istio/proxyv2:1.20.1", true, true},
-		{"docker.io/istio/proxyv2:1.20.0", true, false},
-		{"gcr.io/istio/proxyv2:1.20.1", true, false},
-		{"docker.io/istio/other:1.20.1", true, false},
-		// compareHub=false: registry is ignored
-		{"gcr.io/istio/proxyv2:1.20.1", false, true},
-		{"registry.example.com/istio/proxyv2:1.20.1", false, true},
-		{"docker.io/istio/proxyv2:1.20.0", false, false},
-	}
-	for _, tt := range tests {
-		name := tt.image
-		if !tt.compareHub {
-			name += "_no_hub"
-		}
-		t.Run(name, func(t *testing.T) {
-			p := ParseImage(tt.image)
-			if got := p.Matches(vals, tt.compareHub); got != tt.want {
-				t.Errorf("ParseImage(%q).Matches(compareHub=%v) = %v, want %v", tt.image, tt.compareHub, got, tt.want)
 			}
 		})
 	}
