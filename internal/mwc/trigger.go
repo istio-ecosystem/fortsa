@@ -66,7 +66,8 @@ func getLastModified(mwc *admissionregv1.MutatingWebhookConfiguration) time.Time
 }
 
 // FetchTagToRevisionAndLastModified lists istio-revision-tag-* MutatingWebhookConfigurations,
-// builds tag-to-revision map and tag-to-lastModified map (for pod skip logic).
+// builds tag-to-revision map (for webhook identification logic) and tag-to-lastModified map
+// (for pod skip logic).
 func FetchTagToRevisionAndLastModified(ctx context.Context, c client.Client) (map[string]string, map[string]time.Time, error) {
 	var mwcList admissionregv1.MutatingWebhookConfigurationList
 	if err := c.List(ctx, &mwcList); err != nil {
