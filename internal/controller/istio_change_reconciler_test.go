@@ -103,7 +103,7 @@ func TestIstioChangeReconciler_Reconcile_MWCTrigger(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Reconcile(MWC): %v", err)
 	}
-	// MWC reconcile runs fetchTagMappingAndScan; with nil webhook, scanner returns no workloads
+	// MWC reconcile runs scanAndAnnotate; with nil webhook, scanner returns no workloads
 	// Verifies reconcileMWCChange runs without error
 }
 

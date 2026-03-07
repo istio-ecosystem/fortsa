@@ -42,12 +42,12 @@ func TestFetchTagToRevision(t *testing.T) {
 	}
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(mwc).Build()
 
-	got, err := FetchTagToRevision(context.Background(), fakeClient)
+	got, _, err := FetchTagToRevisionAndLastModified(context.Background(), fakeClient)
 	if err != nil {
-		t.Fatalf("FetchTagToRevision: %v", err)
+		t.Fatalf("FetchTagToRevisionAndLastModified: %v", err)
 	}
 	if got["canary"] != "1-20" {
-		t.Errorf("FetchTagToRevision: want canary->1-20, got %v", got)
+		t.Errorf("FetchTagToRevisionAndLastModified: want canary->1-20, got %v", got)
 	}
 }
 

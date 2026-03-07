@@ -119,11 +119,11 @@ flowchart TD
     CheckName -->|"__istio_change__"| ReconcileAll
     CheckName -->|Namespace only| ReconcileAllNS[reconcileAll with namespaces]
     CheckName -->|Other| Return[Return]
-    ReconcileAll --> BuildRev[Build lastModifiedByRevision from ConfigMaps]
-    ReconcileAllNS --> BuildRev
-    BuildRev --> AwaitDelay[awaitIstiodConfigReadDelay]
-    AwaitDelay --> FetchTag[fetchTagMappingAndScan]
-    FetchTag --> ScanAnnotate[scanAndAnnotate]
+    ReconcileAll --> AwaitDelay[awaitIstiodConfigReadDelay]
+    ReconcileAllNS --> AwaitDelay
+    AwaitDelay --> BuildRev[Build lastModifiedByRevision from ConfigMaps]
+    BuildRev --> FetchMWC[Fetch tagToRevision and lastModifiedByTag from MWCs]
+    FetchMWC --> ScanAnnotate[scanAndAnnotate]
     ScanAnnotate --> AnnotateDelay[annotateWorkloadsWithDelay]
 ```
 
@@ -137,7 +137,7 @@ flowchart TD
 
 ConfigMap and MWC watches both enqueue the same request name `__istio_change__`. Controller-runtime deduplicates by NamespacedName, so multiple rapid events coalesce into a single reconcile run.
 
-All paths converge on `fetchTagMappingAndScan()` → `scanAndAnnotate()` → `annotateWorkloadsWithDelay()`.
+All paths converge on `reconcileAll()`, which builds last-modified data from ConfigMaps and MWCs, then calls `scanAndAnnotate()` → `annotateWorkloadsWithDelay()`.
 
 ## Per-Pod Outdated Detection Flow
 

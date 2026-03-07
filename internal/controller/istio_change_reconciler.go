@@ -19,10 +19,8 @@ package controller
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -30,7 +28,6 @@ import (
 
 	"github.com/istio-ecosystem/fortsa/internal/annotator"
 	"github.com/istio-ecosystem/fortsa/internal/configmap"
-	"github.com/istio-ecosystem/fortsa/internal/constants"
 	"github.com/istio-ecosystem/fortsa/internal/mwc"
 	"github.com/istio-ecosystem/fortsa/internal/periodic"
 	"github.com/istio-ecosystem/fortsa/internal/podscanner"
@@ -140,41 +137,18 @@ func (r *IstioChangeReconciler) reconcileAll(ctx context.Context, limitToNamespa
 		logger.Info("scanning all pods")
 	}
 
-	var cmList corev1.ConfigMapList
-	if err := r.List(ctx, &cmList, client.InNamespace(constants.IstioSystemNamespace)); err != nil {
-		logger.Error(err, "failed to list ConfigMaps")
-		return ctrl.Result{}, fmt.Errorf("list ConfigMaps in %s: %w", constants.IstioSystemNamespace, err)
+	lastModifiedByRevision, err := configmap.BuildLastModifiedByRevision(ctx, r.Client)
+	if err != nil {
+		logger.Error(err, "failed to build last-modified by revision")
+		return ctrl.Result{}, err
 	}
 
-	lastModifiedByRevision := make(map[string]time.Time)
-	for i := range cmList.Items {
-		cm := &cmList.Items[i]
-		if !strings.HasPrefix(cm.Name, constants.ConfigMapNamePrefix) {
-			continue
-		}
-		vals, err := configmap.ParseConfigMapValues(cm)
-		if err != nil {
-			logger.Error(err, "failed to parse ConfigMap values", "configmap", cm.Name)
-			continue
-		}
-		lastModified := configmap.GetConfigMapLastModified(cm)
-		if existing, ok := lastModifiedByRevision[vals.Revision]; !ok || lastModified.After(existing) {
-			lastModifiedByRevision[vals.Revision] = lastModified
-		}
-	}
-
-	return r.fetchTagMappingAndScan(ctx, lastModifiedByRevision, limitToNamespaces)
-}
-
-// fetchTagMappingAndScan fetches tag-to-revision and lastModifiedByTag from MWCs, then scans and annotates.
-// limitToNamespaces, when non-empty, restricts scanning to those namespaces only (e.g. for namespace label changes).
-func (r *IstioChangeReconciler) fetchTagMappingAndScan(ctx context.Context, lastModifiedByRevision map[string]time.Time, limitToNamespaces []string) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
 	tagToRevision, lastModifiedByTag, err := mwc.FetchTagToRevisionAndLastModified(ctx, r.Client)
 	if err != nil {
 		logger.Error(err, "failed to fetch tag-to-revision mapping")
 		return ctrl.Result{}, fmt.Errorf("fetch tag-to-revision mapping: %w", err)
 	}
+
 	return r.scanAndAnnotate(ctx, lastModifiedByRevision, tagToRevision, lastModifiedByTag, limitToNamespaces)
 }
 
