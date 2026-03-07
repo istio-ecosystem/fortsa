@@ -26,7 +26,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -120,6 +119,18 @@ type ScanOptions struct {
 	LimitToNamespaces []string
 }
 
+// IstioConfig holds Istio revision/tag metadata used when scanning pods for outdated sidecars.
+type IstioConfig struct {
+	// LastModifiedByRevision maps revision (e.g. "1-20") to ConfigMap lastModified time.
+	// Used to skip pods created after the config change.
+	LastModifiedByRevision map[string]time.Time
+	// TagToRevision maps istio revision tags to revisions (from istio-revision-tag-* MWCs).
+	TagToRevision map[string]string
+	// LastModifiedByTag maps tag (e.g. "canary") to tag MWC lastModified time.
+	// Used when workload uses a tag; skip pods created after the tag MWC changed.
+	LastModifiedByTag map[string]time.Time
+}
+
 // listPods lists pods according to LimitToNamespaces: single ns, multiple nss, or all.
 func listPods(ctx context.Context, c client.Client, opts ScanOptions) (corev1.PodList, error) {
 	var podList corev1.PodList
@@ -152,12 +163,12 @@ func listPods(ctx context.Context, c client.Client, opts ScanOptions) (corev1.Po
 // shouldSkipPodForLastModified returns true if the pod was created at or after the effective lastModified + IstiodConfigReadDelay.
 // Effective lastModified is the most recent of: ConfigMap lastModified for the revision, MWC lastModified for the tag (when using a tag).
 // Only pods older than that threshold are scanned.
-func shouldSkipPodForLastModified(pod *corev1.Pod, revision, revOrTag string, lastModifiedByRevision, lastModifiedByTag map[string]time.Time, opts ScanOptions) bool {
+func shouldSkipPodForLastModified(pod *corev1.Pod, revision, revOrTag string, cfg IstioConfig, opts ScanOptions) bool {
 	effectiveLastModified := time.Time{}
-	if lastModified, ok := lastModifiedByRevision[revision]; ok && !lastModified.IsZero() {
+	if lastModified, ok := cfg.LastModifiedByRevision[revision]; ok && !lastModified.IsZero() {
 		effectiveLastModified = lastModified
 	}
-	if tagLastModified, ok := lastModifiedByTag[revOrTag]; ok && !tagLastModified.IsZero() && tagLastModified.After(effectiveLastModified) {
+	if tagLastModified, ok := cfg.LastModifiedByTag[revOrTag]; ok && !tagLastModified.IsZero() && tagLastModified.After(effectiveLastModified) {
 		effectiveLastModified = tagLastModified
 	}
 	if effectiveLastModified.IsZero() {
@@ -184,6 +195,52 @@ func getIstioProxyImage(pod *corev1.Pod) string {
 	return ""
 }
 
+// getWorkloadRef fetches the object at nn, returns WorkloadRef on success, nil on NotFound, or error.
+func (s *PodScanner) getWorkloadRef(ctx context.Context, nn types.NamespacedName, kind string, obj client.Object) (*WorkloadRef, error) {
+	if err := s.client.Get(ctx, nn, obj); err != nil {
+		if errors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &WorkloadRef{NamespacedName: nn, Kind: kind}, nil
+}
+
+// getIntermediateObject fetches a ReplicaSet or ControllerRevision; returns nil on NotFound.
+func (s *PodScanner) getIntermediateObject(ctx context.Context, nn types.NamespacedName, kind string) (metav1.Object, error) {
+	switch kind {
+	case "ReplicaSet":
+		var rs appsv1.ReplicaSet
+		if err := s.client.Get(ctx, nn, &rs); err != nil {
+			if errors.IsNotFound(err) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		return &rs, nil
+	case "ControllerRevision":
+		var cr appsv1.ControllerRevision
+		if err := s.client.Get(ctx, nn, &cr); err != nil {
+			if errors.IsNotFound(err) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		return &cr, nil
+	default:
+		return nil, nil
+	}
+}
+
+// fetchIntermediateOwner fetches a ReplicaSet or ControllerRevision and recurses to find the workload.
+func (s *PodScanner) fetchIntermediateOwner(ctx context.Context, nn types.NamespacedName, kind string) (*WorkloadRef, error) {
+	nextObj, err := s.getIntermediateObject(ctx, nn, kind)
+	if err != nil || nextObj == nil {
+		return nil, err
+	}
+	return s.findWorkloadOwner(ctx, nextObj)
+}
+
 // determine the owner of the passed in object and owner reference
 func (s *PodScanner) resolveOwner(ctx context.Context, obj metav1.Object, owner *metav1.OwnerReference) (*WorkloadRef, error) {
 	nn := types.NamespacedName{
@@ -193,62 +250,13 @@ func (s *PodScanner) resolveOwner(ctx context.Context, obj metav1.Object, owner 
 
 	switch owner.Kind {
 	case "Deployment": //nolint:goconst
-		var dep appsv1.Deployment
-		if err := s.client.Get(ctx, nn, &dep); err != nil {
-			if errors.IsNotFound(err) {
-				return nil, nil
-			}
-			return nil, err
-		}
-		return &WorkloadRef{NamespacedName: nn, Kind: "Deployment"}, nil
-
+		return s.getWorkloadRef(ctx, nn, "Deployment", &appsv1.Deployment{})
 	case "StatefulSet":
-		var sts appsv1.StatefulSet
-		if err := s.client.Get(ctx, nn, &sts); err != nil {
-			if errors.IsNotFound(err) {
-				return nil, nil
-			}
-			return nil, err
-		}
-		return &WorkloadRef{NamespacedName: nn, Kind: "StatefulSet"}, nil
-
+		return s.getWorkloadRef(ctx, nn, "StatefulSet", &appsv1.StatefulSet{})
 	case "DaemonSet":
-		var ds appsv1.DaemonSet
-		if err := s.client.Get(ctx, nn, &ds); err != nil {
-			if errors.IsNotFound(err) {
-				return nil, nil
-			}
-			return nil, err
-		}
-		return &WorkloadRef{NamespacedName: nn, Kind: "DaemonSet"}, nil
-
+		return s.getWorkloadRef(ctx, nn, "DaemonSet", &appsv1.DaemonSet{})
 	case "ReplicaSet", "ControllerRevision":
-		// Recurse: fetch the owner and follow its ownerReferences
-		var nextObj runtime.Object
-		switch owner.Kind {
-		case "ReplicaSet":
-			var rs appsv1.ReplicaSet
-			if err := s.client.Get(ctx, nn, &rs); err != nil {
-				if errors.IsNotFound(err) {
-					return nil, nil
-				}
-				return nil, err
-			}
-			nextObj = &rs
-		case "ControllerRevision":
-			// ControllerRevision is unstructured in apps/v1; we need to get it
-			// and check its ownerReferences. ControllerRevision is in apps/v1.
-			var cr appsv1.ControllerRevision
-			if err := s.client.Get(ctx, nn, &cr); err != nil {
-				if errors.IsNotFound(err) {
-					return nil, nil
-				}
-				return nil, err
-			}
-			nextObj = &cr
-		}
-
-		return s.findWorkloadOwner(ctx, nextObj.(metav1.Object))
+		return s.fetchIntermediateOwner(ctx, nn, owner.Kind)
 	}
 
 	return nil, nil
@@ -395,7 +403,7 @@ func (s *PodScanner) buildPodFromWorkload(ctx context.Context, ref *WorkloadRef)
 
 // processPodForOutdatedSidecar checks a single pod for an outdated Istio sidecar. Returns the
 // WorkloadRef when the pod has an outdated sidecar and should be added to results; nil when skipped.
-func (s *PodScanner) processPodForOutdatedSidecar(ctx context.Context, pod *corev1.Pod, tagToRevision map[string]string, lastModifiedByRevision, lastModifiedByTag map[string]time.Time, opts ScanOptions) *WorkloadRef {
+func (s *PodScanner) processPodForOutdatedSidecar(ctx context.Context, pod *corev1.Pod, cfg IstioConfig, opts ScanOptions) *WorkloadRef {
 	logger := log.FromContext(ctx)
 
 	ref, err := s.findWorkloadOwner(ctx, pod)
@@ -420,12 +428,12 @@ func (s *PodScanner) processPodForOutdatedSidecar(ctx context.Context, pod *core
 		return nil
 	}
 	revision := revOrTag
-	if r, ok := tagToRevision[revOrTag]; ok {
+	if r, ok := cfg.TagToRevision[revOrTag]; ok {
 		revision = r
 	}
 
 	// skip pods that were created after the config change + delay - they likely have the correct sidecar
-	if shouldSkipPodForLastModified(pod, revision, revOrTag, lastModifiedByRevision, lastModifiedByTag, opts) {
+	if shouldSkipPodForLastModified(pod, revision, revOrTag, cfg, opts) {
 		return nil
 	}
 
@@ -467,17 +475,17 @@ func (s *PodScanner) processPodForOutdatedSidecar(ctx context.Context, pod *core
 // ScanOutdatedPods lists all Pods, finds each pod's controller (Deployment/StatefulSet/DaemonSet),
 // builds a pod from the workload template, submits it to the Istio injection webhook, and compares
 // the mutated response's istio-proxy image with the current pod. Returns WorkloadRefs for pods
-// with outdated sidecars. lastModifiedByRevision is used for the ConfigMap LastModified skip.
-// lastModifiedByTag is used for the tag MWC LastModified skip when workload uses a tag.
-// tagToRevision maps istio revision tags to revisions (from istio-revision-tag-* MutatingWebhookConfigurations).
-func (s *PodScanner) ScanOutdatedPods(ctx context.Context, lastModifiedByRevision map[string]time.Time, tagToRevision map[string]string, lastModifiedByTag map[string]time.Time, opts ScanOptions) ([]WorkloadRef, error) {
+// with outdated sidecars. cfg.LastModifiedByRevision is used for the ConfigMap LastModified skip.
+// cfg.LastModifiedByTag is used for the tag MWC LastModified skip when workload uses a tag.
+// cfg.TagToRevision maps istio revision tags to revisions (from istio-revision-tag-* MutatingWebhookConfigurations).
+func (s *PodScanner) ScanOutdatedPods(ctx context.Context, cfg IstioConfig, opts ScanOptions) ([]WorkloadRef, error) {
 	logger := log.FromContext(ctx)
 
 	if s.webhookCaller == nil {
 		return nil, nil
 	}
-	if tagToRevision == nil {
-		tagToRevision = map[string]string{}
+	if cfg.TagToRevision == nil {
+		cfg.TagToRevision = map[string]string{}
 	}
 
 	// get a list of pods we will scan
@@ -506,7 +514,7 @@ func (s *PodScanner) ScanOutdatedPods(ctx context.Context, lastModifiedByRevisio
 		logger.V(1).Info("scanning pod", "namespace", pod.Namespace, "name", pod.Name)
 
 		// returns WorkloadRef when the pod has an outdated sidecar and should be added to results; nil when skipped.
-		ref := s.processPodForOutdatedSidecar(ctx, pod, tagToRevision, lastModifiedByRevision, lastModifiedByTag, opts)
+		ref := s.processPodForOutdatedSidecar(ctx, pod, cfg, opts)
 		if ref == nil {
 			continue
 		}

@@ -54,6 +54,44 @@ func VersionToRevision(version string) string {
 	return strings.ReplaceAll(version, ".", "-")
 }
 
+// extractTarEntry extracts a single tar entry to tmpDir, skipping path-traversal entries.
+func extractTarEntry(tarReader *tar.Reader, header *tar.Header, tmpDir, absTmpDir string) error {
+	target := filepath.Join(tmpDir, header.Name)
+	var err error
+	target, err = filepath.Abs(target)
+	if err != nil {
+		return fmt.Errorf("failed to resolve path for %s: %w", header.Name, err)
+	}
+	rel, err := filepath.Rel(absTmpDir, target)
+	if err != nil {
+		return fmt.Errorf("failed to compute relative path for %s: %w", target, err)
+	}
+	if strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || rel == ".." {
+		return nil
+	}
+
+	switch header.Typeflag {
+	case tar.TypeDir:
+		if err := os.MkdirAll(target, 0o755); err != nil {
+			return fmt.Errorf("failed to create dir %s: %w", target, err)
+		}
+	case tar.TypeReg:
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return fmt.Errorf("failed to create parent dir for %s: %w", target, err)
+		}
+		outFile, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR|os.O_TRUNC, os.FileMode(header.Mode))
+		if err != nil {
+			return fmt.Errorf("failed to create file %s: %w", target, err)
+		}
+		if _, err := io.Copy(outFile, tarReader); err != nil {
+			_ = outFile.Close()
+			return fmt.Errorf("failed to write file %s: %w", target, err)
+		}
+		_ = outFile.Close()
+	}
+	return nil
+}
+
 // DownloadIstio downloads an Istio release from GitHub, extracts it to tmpDir, and returns
 // the path to the extracted directory (e.g. tmpDir/istio-1.28.4).
 func DownloadIstio(version, tmpDir string) (istioDir string, err error) {
@@ -91,39 +129,8 @@ func DownloadIstio(version, tmpDir string) (istioDir string, err error) {
 		if err != nil {
 			return "", fmt.Errorf("failed to read tar: %w", err)
 		}
-
-		target := filepath.Join(tmpDir, header.Name)
-		target, err = filepath.Abs(target)
-		if err != nil {
-			return "", fmt.Errorf("failed to resolve path for %s: %w", header.Name, err)
-		}
-		rel, err := filepath.Rel(absTmpDir, target)
-		if err != nil {
-			return "", fmt.Errorf("failed to compute relative path for %s: %w", target, err)
-		}
-		if strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || rel == ".." {
-			// Skip entries that would escape the extraction directory.
-			continue
-		}
-
-		switch header.Typeflag {
-		case tar.TypeDir:
-			if err := os.MkdirAll(target, 0o755); err != nil {
-				return "", fmt.Errorf("failed to create dir %s: %w", target, err)
-			}
-		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-				return "", fmt.Errorf("failed to create parent dir for %s: %w", target, err)
-			}
-			outFile, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR|os.O_TRUNC, os.FileMode(header.Mode))
-			if err != nil {
-				return "", fmt.Errorf("failed to create file %s: %w", target, err)
-			}
-			if _, err := io.Copy(outFile, tarReader); err != nil {
-				_ = outFile.Close()
-				return "", fmt.Errorf("failed to write file %s: %w", target, err)
-			}
-			_ = outFile.Close()
+		if err := extractTarEntry(tarReader, header, tmpDir, absTmpDir); err != nil {
+			return "", err
 		}
 	}
 
