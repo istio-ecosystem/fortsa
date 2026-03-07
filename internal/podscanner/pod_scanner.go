@@ -157,10 +157,10 @@ func listPods(ctx context.Context, c client.Client, opts ScanOptions) (corev1.Po
 	return podList, nil
 }
 
-// shouldSkipPodForConfigMap returns true if the pod was created at or after the effective lastModified + IstiodConfigReadDelay.
+// shouldSkipPodForLastModified returns true if the pod was created at or after the effective lastModified + IstiodConfigReadDelay.
 // Effective lastModified is the most recent of: ConfigMap lastModified for the revision, MWC lastModified for the tag (when using a tag).
 // Only pods older than that threshold are scanned.
-func shouldSkipPodForConfigMap(pod *corev1.Pod, revision, revOrTag string, lastModifiedByRevision, lastModifiedByTag map[string]time.Time, opts ScanOptions) bool {
+func shouldSkipPodForLastModified(pod *corev1.Pod, revision, revOrTag string, lastModifiedByRevision, lastModifiedByTag map[string]time.Time, opts ScanOptions) bool {
 	effectiveLastModified := time.Time{}
 	if lastModified, ok := lastModifiedByRevision[revision]; ok && !lastModified.IsZero() {
 		effectiveLastModified = lastModified
@@ -205,7 +205,7 @@ func (s *PodScanner) processPodForOutdatedSidecar(ctx context.Context, pod *core
 		revision = r
 	}
 
-	if shouldSkipPodForConfigMap(pod, revision, revOrTag, lastModifiedByRevision, lastModifiedByTag, opts) {
+	if shouldSkipPodForLastModified(pod, revision, revOrTag, lastModifiedByRevision, lastModifiedByTag, opts) {
 		return nil
 	}
 
