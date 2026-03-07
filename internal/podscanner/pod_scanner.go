@@ -38,7 +38,7 @@ import (
 const (
 	istioProxyContainerName = "istio-proxy"
 	dnsSubdomainMaxLen      = 63
-	podNameSuffix           = "-fortsa2-check"
+	podNameSuffix           = "-fortsa-check"
 )
 
 // ParsedImage holds the components of a container image reference.
@@ -167,6 +167,7 @@ func shouldSkipPodForLastModified(pod *corev1.Pod, revision, revOrTag string, la
 	return !pod.CreationTimestamp.Time.Before(effectiveWithDelay)
 }
 
+// get the istio-proxy image from the pod
 func getIstioProxyImage(pod *corev1.Pod) string {
 	// Check regular containers (traditional Istio sidecar injection)
 	for i := range pod.Spec.Containers {
@@ -174,7 +175,7 @@ func getIstioProxyImage(pod *corev1.Pod) string {
 			return pod.Spec.Containers[i].Image
 		}
 	}
-	// Check init containers (Kubernetes native sidecars: istio-proxy in initContainers with restartPolicy: Always)
+	// Check init containers (Kubernetes native sidecars)
 	for i := range pod.Spec.InitContainers {
 		if pod.Spec.InitContainers[i].Name == istioProxyContainerName {
 			return pod.Spec.InitContainers[i].Image
@@ -183,6 +184,7 @@ func getIstioProxyImage(pod *corev1.Pod) string {
 	return ""
 }
 
+// determine the owner of the passed in object and owner reference
 func (s *PodScanner) resolveOwner(ctx context.Context, obj metav1.Object, owner *metav1.OwnerReference) (*WorkloadRef, error) {
 	nn := types.NamespacedName{
 		Namespace: obj.GetNamespace(),
@@ -334,8 +336,9 @@ func (s *PodScanner) getIstioRevFromWorkloadOrNamespace(ctx context.Context, ref
 func (s *PodScanner) buildPodFromWorkload(ctx context.Context, ref *WorkloadRef) (*corev1.Pod, error) {
 	nn := ref.NamespacedName
 	// Default to a placeholder name; the webhook doesn't require a real pod name.
-	name := "fortsa2-check"
+	name := "fortsa-check"
 	if nn.Name != "" {
+		// ensure the generated name is not too long
 		if len(nn.Name) > dnsSubdomainMaxLen-len(podNameSuffix) {
 			name = nn.Name[:dnsSubdomainMaxLen-len(podNameSuffix)]
 		}
@@ -405,6 +408,7 @@ func (s *PodScanner) processPodForOutdatedSidecar(ctx context.Context, pod *core
 		return nil
 	}
 
+	// try to determine the istio revision so we know which webhook to call
 	revOrTag, err := s.getIstioRevFromWorkloadOrNamespace(ctx, ref)
 	if err != nil {
 		logger.Error(err, "failed to get istio revision from workload or namespace", "namespace", ref.Namespace, "name", ref.Name, "kind", ref.Kind)
@@ -420,20 +424,22 @@ func (s *PodScanner) processPodForOutdatedSidecar(ctx context.Context, pod *core
 		revision = r
 	}
 
+	// skip pods that were created after the config change + delay - they likely have the correct sidecar
 	if shouldSkipPodForLastModified(pod, revision, revOrTag, lastModifiedByRevision, lastModifiedByTag, opts) {
 		return nil
 	}
 
 	logger.V(1).Info("found workload", "namespace", ref.Namespace, "name", ref.Name, "kind", ref.Kind)
 
+	// build a Pod object from the workload template that we can send to the webhook to see what the expected sidecar image is
 	templatePod, err := s.buildPodFromWorkload(ctx, ref)
 	if err != nil {
 		logger.Error(err, "failed to build check pod from workload", "namespace", ref.Namespace, "name", ref.Name, "kind", ref.Kind)
 		return nil
 	}
 
-	//nolint:goconst // "default" is the Istio default revision name
-	mutated, err := s.webhookCaller.CallWebhook(ctx, templatePod, revision, revOrTag == "default")
+	// call Istio's pod-injector webhook to determine the expected sidecar image
+	mutated, err := s.webhookCaller.CallWebhook(ctx, templatePod, revision, revOrTag == "default") //nolint:goconst
 	if err != nil {
 		logger.Error(err, "webhook call failed", "namespace", pod.Namespace, "name", pod.Name)
 		return nil
@@ -474,6 +480,7 @@ func (s *PodScanner) ScanOutdatedPods(ctx context.Context, lastModifiedByRevisio
 		tagToRevision = map[string]string{}
 	}
 
+	// get a list of pods we will scan
 	podList, err := listPods(ctx, s.client, opts)
 	if err != nil {
 		return nil, err
@@ -491,16 +498,19 @@ func (s *PodScanner) ScanOutdatedPods(ctx context.Context, lastModifiedByRevisio
 
 	for i := range podList.Items {
 		pod := &podList.Items[i]
+		// skip pods in the namespaces we are skipping
 		if _, skip := skipSet[pod.Namespace]; skip {
 			continue
 		}
 
 		logger.V(1).Info("scanning pod", "namespace", pod.Namespace, "name", pod.Name)
 
+		// returns WorkloadRef when the pod has an outdated sidecar and should be added to results; nil when skipped.
 		ref := s.processPodForOutdatedSidecar(ctx, pod, tagToRevision, lastModifiedByRevision, lastModifiedByTag, opts)
 		if ref == nil {
 			continue
 		}
+		// avoid adding the same workload multiple times
 		if _, ok := seen[ref.NamespacedName]; ok {
 			continue
 		}
