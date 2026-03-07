@@ -21,7 +21,6 @@ This document describes how Fortsa works internally: its components, data flows,
 fortsa/
 ├── cmd/main.go              # Entry point, flag parsing, manager setup
 ├── internal/
-│   ├── cache/               # ConfigMap revision cache for pod skip logic
 │   ├── controller/          # IstioChangeReconciler, reconcile routing
 │   ├── mwc/                 # MWC predicate, tag mapping fetch, reconcile request
 │   ├── namespace/            # Namespace predicates, reconcile request
@@ -132,7 +131,7 @@ flowchart TD
 | Request | Trigger | Handler |
 | ------- | ------- | ------- |
 | `__periodic_reconcile__` | Periodic ticker | `reconcileAll()` — full scan of all ConfigMaps |
-| `__istio_change__` | ConfigMap or MWC change | `reconcileAll()` — clear cache, repopulate, delay, scan |
+| `__istio_change__` | ConfigMap or MWC change | `reconcileAll()` — build last-modified from ConfigMaps and MWCs, delay, scan |
 | Namespace-only (req.Name = namespace, req.Namespace empty) | Namespace label change | `reconcileAll(ctx, []string{namespace})` — scan only that namespace |
 
 ConfigMap and MWC watches both enqueue the same request name `__istio_change__`. Controller-runtime deduplicates by NamespacedName, so multiple rapid events coalesce into a single reconcile run.

@@ -1,3 +1,5 @@
+# Code Walkthrough
+
 ## Fortsa: linear code walkthrough (prose-only)
 
 This is a linear walkthrough of how Fortsa works internally. It is intentionally **prose-only** (no fenced code blocks) so it reads like a narrative companion to the source.
@@ -40,8 +42,8 @@ The namespace watch encodes “scan only this namespace” by issuing a request 
 
 `IstioChangeReconciler` is the single reconciler implementation used by the controller. It routes reconcile requests by inspecting the request fields:
 
-- Name equals `__periodic_reconcile__`: clear the cache, repopulate from all matching ConfigMaps, await delay, then scan.
-- Name equals `__istio_change__` (ConfigMap or MWC change): same as periodic—clear cache, repopulate, await delay, then scan.
+- Name equals `__periodic_reconcile__`: build last-modified from ConfigMaps and MWCs, await delay, then scan.
+- Name equals `__istio_change__` (ConfigMap or MWC change): same as periodic—build last-modified from ConfigMaps and MWCs, await delay, then scan.
 - Namespace is empty and name is set: treat name as a namespace and scan only that namespace.
 - Otherwise: ignore (unknown request).
 
@@ -163,9 +165,8 @@ Regardless of trigger source (ConfigMap change, MWC change, namespace label chan
 ### End-to-end trace (high-level)
 
 1. A watch event (or periodic tick) enqueues a reconcile request.
-2. The reconciler routes the request type and optionally refreshes cache state.
+2. The reconciler routes the request type and builds last-modified data from ConfigMaps and MWCs.
 3. Fortsa optionally waits `--istiod-config-read-delay` so that webhook reads reflect updated config.
 4. Fortsa scans pods and uses the Istio webhook to compute expected injection output.
 5. Fortsa patches qualifying workloads with `fortsa.scaffidi.net/restartedAt` (subject to cooldown and throttling).
 6. Kubernetes rolls the workload and newly created pods get injected by Istio with the expected sidecar.
-
