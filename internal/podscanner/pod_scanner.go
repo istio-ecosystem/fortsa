@@ -118,8 +118,8 @@ type ScanOptions struct {
 	// CompareHub, when true, requires registry to match when comparing images.
 	// When false, only image name and tag are compared (registry is ignored).
 	CompareHub bool
-	// IstiodConfigReadDelay is added to ConfigMap LastModified when deciding whether to skip pods.
-	// Pods created within this window after a ConfigMap update may have been injected before
+	// IstiodConfigReadDelay is added to the effective lastModified (max of ConfigMap and MWC) when deciding whether to skip pods.
+	// Pods created within this window after a config update may have been injected before
 	// Istiod loaded the new config, so we still scan them.
 	IstiodConfigReadDelay time.Duration
 	// SkipNamespaces lists namespaces to skip when scanning pods.
@@ -157,29 +157,22 @@ func listPods(ctx context.Context, c client.Client, opts ScanOptions) (corev1.Po
 	return podList, nil
 }
 
-// shouldSkipPodForConfigMap returns true if the pod was created after the ConfigMap was last
-// updated (and thus was injected with current config). When using a tag, also considers the tag's
-// MWC LastModified: if the tag was modified after the pod was created, we must scan.
-func shouldSkipPodForConfigMap(pod *corev1.Pod, revision, revOrTag string, lastModifiedByRevision, lastModifiedByTag map[string]time.Time, opts ScanOptions) bool {
-	skip := false
+// shouldSkipPodForLastModified returns true if the pod was created at or after the effective lastModified + IstiodConfigReadDelay.
+// Effective lastModified is the most recent of: ConfigMap lastModified for the revision, MWC lastModified for the tag (when using a tag).
+// Only pods older than that threshold are scanned.
+func shouldSkipPodForLastModified(pod *corev1.Pod, revision, revOrTag string, lastModifiedByRevision, lastModifiedByTag map[string]time.Time, opts ScanOptions) bool {
+	effectiveLastModified := time.Time{}
 	if lastModified, ok := lastModifiedByRevision[revision]; ok && !lastModified.IsZero() {
-		effectiveLastModified := lastModified.Add(opts.IstiodConfigReadDelay)
-		if !pod.CreationTimestamp.Time.Before(effectiveLastModified) {
-			skip = true
-		}
+		effectiveLastModified = lastModified
 	}
-	if skip && revOrTag != revision {
-		// Using a tag - override skip if tag's MWC was modified after pod was created
-		if tagLastModified, ok := lastModifiedByTag[revOrTag]; ok && !tagLastModified.IsZero() {
-			tagEffective := tagLastModified.Add(opts.IstiodConfigReadDelay)
-			if pod.CreationTimestamp.Time.Before(tagEffective) {
-				skip = false // Tag was modified after pod - must scan
-			}
-		} else {
-			skip = false // No tag lastModified info - be conservative, scan
-		}
+	if tagLastModified, ok := lastModifiedByTag[revOrTag]; ok && !tagLastModified.IsZero() && tagLastModified.After(effectiveLastModified) {
+		effectiveLastModified = tagLastModified
 	}
-	return skip
+	if effectiveLastModified.IsZero() {
+		return false
+	}
+	effectiveWithDelay := effectiveLastModified.Add(opts.IstiodConfigReadDelay)
+	return !pod.CreationTimestamp.Time.Before(effectiveWithDelay)
 }
 
 // processPodForOutdatedSidecar checks a single pod for an outdated Istio sidecar. Returns the
@@ -212,7 +205,7 @@ func (s *PodScanner) processPodForOutdatedSidecar(ctx context.Context, pod *core
 		revision = r
 	}
 
-	if shouldSkipPodForConfigMap(pod, revision, revOrTag, lastModifiedByRevision, lastModifiedByTag, opts) {
+	if shouldSkipPodForLastModified(pod, revision, revOrTag, lastModifiedByRevision, lastModifiedByTag, opts) {
 		return nil
 	}
 

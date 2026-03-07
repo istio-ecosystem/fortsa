@@ -1,3 +1,5 @@
+# Agents Standards
+
 ## Purpose
 
 This file defines **non-negotiable engineering standards** for anyone (human or AI agent) making changes to this repository. It is optimized for **high Go code quality**, long-term maintainability, and safety when interacting with Kubernetes clusters.
@@ -57,7 +59,6 @@ The repo uses a layered package structure under `internal/`. Follow it.
   - `podscanner`: cluster reads and detection logic.
   - `annotator`: workload patching/updates.
   - `webhook`: calling Istio injection webhook and parsing.
-  - `cache`: change-detection state.
 - **MUST** keep `cmd/main.go` focused on wiring, flags, and manager startup.
 
 ## Formatting, naming, and API surface
@@ -260,4 +261,3 @@ return fmt.Errorf("parse istio values JSON: %w", err)
 - **Architecture**
   - **MUST NOT** introduce CRDs.
   - **MUST** keep dependencies minimal and package boundaries clean.
-

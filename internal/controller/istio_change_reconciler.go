@@ -19,19 +19,15 @@ package controller
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/istio-ecosystem/fortsa/internal/annotator"
-	"github.com/istio-ecosystem/fortsa/internal/cache"
 	"github.com/istio-ecosystem/fortsa/internal/configmap"
-	"github.com/istio-ecosystem/fortsa/internal/constants"
 	"github.com/istio-ecosystem/fortsa/internal/mwc"
 	"github.com/istio-ecosystem/fortsa/internal/periodic"
 	"github.com/istio-ecosystem/fortsa/internal/podscanner"
@@ -84,8 +80,6 @@ type IstioChangeReconciler struct {
 	restartDelay          time.Duration
 	istiodConfigReadDelay time.Duration
 	skipNamespaces        []string
-
-	revisionCache *cache.RevisionCache
 }
 
 // NewIstioChangeReconciler creates a new IstioChangeReconciler from the given options.
@@ -100,7 +94,6 @@ func NewIstioChangeReconciler(opts ReconcilerOptions) *IstioChangeReconciler {
 		restartDelay:          opts.RestartDelay,
 		istiodConfigReadDelay: opts.IstiodConfigReadDelay,
 		skipNamespaces:        opts.SkipNamespaces,
-		revisionCache:         cache.NewRevisionCache(),
 	}
 }
 
@@ -111,88 +104,65 @@ func (r *IstioChangeReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	// Periodic reconciliation: full reconcile of all ConfigMaps (ticker-triggered only)
 	if req.Name == periodic.ReconcileRequestName() {
 		log.FromContext(ctx).Info("periodic reconciliation")
-		return r.reconcileAll(ctx)
+		return r.reconcileAll(ctx, nil)
 	}
 
 	// ConfigMap change: list matching ConfigMaps, refresh cache, and scan
 	if req.Name == configmap.ReconcileRequestName() {
 		log.FromContext(ctx).Info("Istio change, reconciling")
-		return r.reconcileAll(ctx)
+		return r.reconcileAll(ctx, nil)
 	}
 
 	// Namespace label change: scan only pods in that namespace
 	if req.Namespace == "" && req.Name != "" {
 		log.FromContext(ctx).Info("namespace label change, scanning namespace", "namespace", req.Name)
-		return r.reconcileNamespace(ctx, req.Name)
+		return r.reconcileAll(ctx, []string{req.Name})
 	}
 
 	log.FromContext(ctx).Error(fmt.Errorf("unhandled reconciliation trigger: %+v", req), "ignoring request")
 	return ctrl.Result{}, nil
 }
 
-// reconcileNamespace performs a namespace-scoped reconciliation when Istio labels change on a namespace.
-func (r *IstioChangeReconciler) reconcileNamespace(ctx context.Context, namespace string) (ctrl.Result, error) {
+// reconcileAll performs a full reconciliation of istio-sidecar-injector ConfigMaps.
+// When limitToNamespaces is nil, scans all namespaces; when non-nil, restricts scanning to those namespaces.
+func (r *IstioChangeReconciler) reconcileAll(ctx context.Context, limitToNamespaces []string) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-	logger.Info("reconciling namespace (Istio label change)", "namespace", namespace)
-	if err := r.awaitIstiodConfigReadDelay(ctx); err != nil {
-		return ctrl.Result{}, fmt.Errorf("await istiod config read delay: %w", err)
-	}
-	return r.fetchTagMappingAndScan(ctx, []string{namespace})
-}
-
-// reconcileAll performs a full reconciliation of all istio-sidecar-injector ConfigMaps,
-// bypassing change detection. Used for periodic reconciliation only.
-func (r *IstioChangeReconciler) reconcileAll(ctx context.Context) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
-	logger.Info("scanning all pods")
-
-	var cmList corev1.ConfigMapList
-	if err := r.List(ctx, &cmList, client.InNamespace(constants.IstioSystemNamespace)); err != nil {
-		logger.Error(err, "failed to list ConfigMaps")
-		return ctrl.Result{}, fmt.Errorf("list ConfigMaps in %s: %w", constants.IstioSystemNamespace, err)
-	}
-
-	r.revisionCache.ClearAll()
-	for i := range cmList.Items {
-		cm := &cmList.Items[i]
-		if !strings.HasPrefix(cm.Name, constants.ConfigMapNamePrefix) {
-			continue
-		}
-		vals, err := configmap.ParseConfigMapValues(cm)
-		if err != nil {
-			logger.Error(err, "failed to parse ConfigMap values", "configmap", cm.Name)
-			// Partial success: skip invalid ConfigMap, continue with others.
-			continue
-		}
-		r.revisionCache.Set(client.ObjectKeyFromObject(cm).String(), vals.Revision, configmap.GetConfigMapLastModified(cm))
-	}
 
 	if err := r.awaitIstiodConfigReadDelay(ctx); err != nil {
 		return ctrl.Result{}, fmt.Errorf("await istiod config read delay: %w", err)
 	}
-	return r.fetchTagMappingAndScan(ctx, nil)
-}
 
-// fetchTagMappingAndScan fetches tag-to-revision and lastModifiedByTag from MWCs, then scans and annotates.
-// limitToNamespaces, when non-empty, restricts scanning to those namespaces only (e.g. for namespace label changes).
-func (r *IstioChangeReconciler) fetchTagMappingAndScan(ctx context.Context, limitToNamespaces []string) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
+	if limitToNamespaces != nil {
+		logger.Info("scanning namespaces", "namespaces", limitToNamespaces)
+	} else {
+		logger.Info("scanning all pods")
+	}
+
+	lastModifiedByRevision, err := configmap.BuildLastModifiedByRevision(ctx, r.Client)
+	if err != nil {
+		logger.Error(err, "failed to build last-modified by revision")
+		return ctrl.Result{}, err
+	}
+
 	tagToRevision, lastModifiedByTag, err := mwc.FetchTagToRevisionAndLastModified(ctx, r.Client)
 	if err != nil {
 		logger.Error(err, "failed to fetch tag-to-revision mapping")
 		return ctrl.Result{}, fmt.Errorf("fetch tag-to-revision mapping: %w", err)
 	}
-	return r.scanAndAnnotate(ctx, tagToRevision, lastModifiedByTag, limitToNamespaces)
+
+	return r.scanAndAnnotate(ctx, lastModifiedByRevision, tagToRevision, lastModifiedByTag, limitToNamespaces)
 }
 
-// scanAndAnnotate scans for outdated pods using the current cache and annotates workloads to trigger restarts.
+// scanAndAnnotate scans for outdated pods and annotates workloads to trigger restarts.
 // limitToNamespaces, when non-empty, restricts scanning to those namespaces only.
-func (r *IstioChangeReconciler) scanAndAnnotate(ctx context.Context, tagToRevision map[string]string, lastModifiedByTag map[string]time.Time, limitToNamespaces []string) (ctrl.Result, error) {
+func (r *IstioChangeReconciler) scanAndAnnotate(ctx context.Context, lastModifiedByRevision map[string]time.Time, tagToRevision map[string]string, lastModifiedByTag map[string]time.Time, limitToNamespaces []string) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	if tagToRevision == nil {
 		tagToRevision = map[string]string{}
 	}
-	lastModifiedByRevision := r.revisionCache.GetCopy()
+	if lastModifiedByRevision == nil {
+		lastModifiedByRevision = map[string]time.Time{}
+	}
 	opts := podscanner.ScanOptions{
 		CompareHub:            r.compareHub,
 		IstiodConfigReadDelay: r.istiodConfigReadDelay,

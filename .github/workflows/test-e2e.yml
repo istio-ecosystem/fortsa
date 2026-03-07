@@ -58,7 +58,7 @@ jobs:
       # we want to pre-create the manager image to avoid the opaque build step in the tests 
       - name: Run docker build to pre-create the manager image
         run: |
-          make docker-build
+          make docker-build IMG=example.com/fortsa:v0.0.1
           
       - name: Running Test e2e
         run: |
