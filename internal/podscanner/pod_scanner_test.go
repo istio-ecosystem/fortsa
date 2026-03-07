@@ -26,8 +26,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-
-	"github.com/istio-ecosystem/fortsa/internal/configmap"
 )
 
 // fakeWebhookCaller returns a mutated pod with the given istio-proxy image.
@@ -80,449 +78,424 @@ func TestParseImage(t *testing.T) {
 	}
 }
 
-func TestParsedImage_Matches(t *testing.T) {
-	vals := &configmap.IstioValues{Hub: "docker.io/istio", Tag: "1.20.1", Image: "proxyv2"}
-	tests := []struct {
-		image      string
-		compareHub bool
-		want       bool
-	}{
-		{"docker.io/istio/proxyv2:1.20.1", true, true},
-		{"docker.io/istio/proxyv2:1.20.0", true, false},
-		{"gcr.io/istio/proxyv2:1.20.1", true, false},
-		{"docker.io/istio/other:1.20.1", true, false},
-		// compareHub=false: registry is ignored
-		{"gcr.io/istio/proxyv2:1.20.1", false, true},
-		{"registry.example.com/istio/proxyv2:1.20.1", false, true},
-		{"docker.io/istio/proxyv2:1.20.0", false, false},
+func testGetPodRevision_RevisionFromSidecarStatus(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = appsv1.AddToScheme(scheme)
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(
+			&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default", Labels: map[string]string{"istio-injection": "enabled"}}},
+			&corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pod-canary",
+					Namespace: "default",
+					OwnerReferences: []metav1.OwnerReference{
+						{Kind: "ReplicaSet", Name: "rs-1", Controller: ptr(true)},
+					},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: istioProxyContainerName, Image: "docker.io/istio/proxyv2:1.19.0"},
+					},
+				},
+			},
+			&appsv1.ReplicaSet{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "rs-1",
+					Namespace: "default",
+					OwnerReferences: []metav1.OwnerReference{
+						{Kind: "Deployment", Name: "dep-1", Controller: ptr(true)},
+					},
+				},
+			},
+			&appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{Name: "dep-1", Namespace: "default"},
+				Spec: appsv1.DeploymentSpec{
+					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "test"}},
+					Template: corev1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "test"}},
+						Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx"}}},
+					},
+				},
+			},
+		).
+		Build()
+
+	webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
+	scanner := NewPodScanner(fakeClient, webhook)
+	lastModifiedByRevision := map[string]time.Time{}
+	workloads, err := scanner.ScanOutdatedPods(context.Background(), IstioConfig{LastModifiedByRevision: lastModifiedByRevision}, ScanOptions{})
+	if err != nil {
+		t.Fatalf("ScanOutdatedPods: %v", err)
 	}
-	for _, tt := range tests {
-		name := tt.image
-		if !tt.compareHub {
-			name += "_no_hub"
-		}
-		t.Run(name, func(t *testing.T) {
-			p := ParseImage(tt.image)
-			if got := p.Matches(vals, tt.compareHub); got != tt.want {
-				t.Errorf("ParseImage(%q).Matches(compareHub=%v) = %v, want %v", tt.image, tt.compareHub, got, tt.want)
-			}
-		})
+	if len(workloads) != 1 {
+		t.Errorf("want 1 workload, got %d", len(workloads))
+	}
+	if len(workloads) > 0 && workloads[0].Name != "dep-1" {
+		t.Errorf("want dep-1, got %s", workloads[0].Name)
+	}
+}
+
+func testGetPodRevision_SkipNoWorkloadOwner(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(
+			&corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pod-standalone",
+					Namespace: "default",
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: istioProxyContainerName, Image: "docker.io/istio/proxyv2:1.19.0"},
+					},
+				},
+			},
+		).
+		Build()
+
+	webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
+	scanner := NewPodScanner(fakeClient, webhook)
+	lastModifiedByRevision := map[string]time.Time{}
+	workloads, err := scanner.ScanOutdatedPods(context.Background(), IstioConfig{LastModifiedByRevision: lastModifiedByRevision}, ScanOptions{})
+	if err != nil {
+		t.Fatalf("ScanOutdatedPods: %v", err)
+	}
+	if len(workloads) != 0 {
+		t.Errorf("want 0 workloads (pod has no workload owner), got %d", len(workloads))
+	}
+}
+
+func testGetPodRevision_SkipUpToDateImage(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = appsv1.AddToScheme(scheme)
+
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "dep-ok", Namespace: "default"},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "ok"}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "ok"}},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx"}}},
+			},
+		},
+	}
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(
+			&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default", Labels: map[string]string{"istio-injection": "enabled"}}},
+			dep,
+			&appsv1.ReplicaSet{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "rs-ok",
+					Namespace: "default",
+					OwnerReferences: []metav1.OwnerReference{
+						{Kind: "Deployment", Name: "dep-ok", Controller: ptr(true)},
+					},
+				},
+			},
+			&corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pod-ok",
+					Namespace: "default",
+					OwnerReferences: []metav1.OwnerReference{
+						{Kind: "ReplicaSet", Name: "rs-ok", Controller: ptr(true)},
+					},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: istioProxyContainerName, Image: "docker.io/istio/proxyv2:1.20.1"},
+					},
+				},
+			},
+		).
+		Build()
+
+	webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
+	scanner := NewPodScanner(fakeClient, webhook)
+	lastModifiedByRevision := map[string]time.Time{}
+	workloads, err := scanner.ScanOutdatedPods(context.Background(), IstioConfig{LastModifiedByRevision: lastModifiedByRevision}, ScanOptions{})
+	if err != nil {
+		t.Fatalf("ScanOutdatedPods: %v", err)
+	}
+	if len(workloads) != 0 {
+		t.Errorf("want 0 workloads (image matches webhook), got %d", len(workloads))
+	}
+}
+
+func testGetPodRevision_SkipPodCreatedAfterConfigMap(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = appsv1.AddToScheme(scheme)
+
+	configMapTime := time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC)
+	podTime := time.Date(2024, 1, 15, 11, 0, 0, 0, time.UTC)
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(
+			&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default", Labels: map[string]string{"istio-injection": "enabled"}}},
+			&appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{Name: "dep-1", Namespace: "default"},
+				Spec: appsv1.DeploymentSpec{
+					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "test"}},
+					Template: corev1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "test"}},
+						Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx"}}},
+					},
+				},
+			},
+			&appsv1.ReplicaSet{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "rs-1",
+					Namespace: "default",
+					OwnerReferences: []metav1.OwnerReference{
+						{Kind: "Deployment", Name: "dep-1", Controller: ptr(true)},
+					},
+				},
+			},
+			&corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              "pod-new",
+					Namespace:         "default",
+					CreationTimestamp: metav1.NewTime(podTime),
+					OwnerReferences: []metav1.OwnerReference{
+						{Kind: "ReplicaSet", Name: "rs-1", Controller: ptr(true)},
+					},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: istioProxyContainerName, Image: "docker.io/istio/proxyv2:1.19.0"},
+					},
+				},
+			},
+		).
+		Build()
+
+	webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
+	scanner := NewPodScanner(fakeClient, webhook)
+	lastModifiedByRevision := map[string]time.Time{"default": configMapTime}
+	workloads, err := scanner.ScanOutdatedPods(context.Background(), IstioConfig{LastModifiedByRevision: lastModifiedByRevision}, ScanOptions{})
+	if err != nil {
+		t.Fatalf("ScanOutdatedPods: %v", err)
+	}
+	if len(workloads) != 0 {
+		t.Errorf("want 0 workloads (pod created after ConfigMap), got %d", len(workloads))
+	}
+}
+
+func testGetPodRevision_ScanPodInIstiodConfigReadDelayWindow(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = appsv1.AddToScheme(scheme)
+
+	configMapTime := time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC)
+	podTime := time.Date(2024, 1, 15, 10, 0, 5, 0, time.UTC)
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(
+			&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default", Labels: map[string]string{"istio-injection": "enabled"}}},
+			&appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{Name: "dep-1", Namespace: "default"},
+				Spec: appsv1.DeploymentSpec{
+					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "test"}},
+					Template: corev1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "test"}},
+						Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx"}}},
+					},
+				},
+			},
+			&appsv1.ReplicaSet{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "rs-1",
+					Namespace: "default",
+					OwnerReferences: []metav1.OwnerReference{
+						{Kind: "Deployment", Name: "dep-1", Controller: ptr(true)},
+					},
+				},
+			},
+			&corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              "pod-in-window",
+					Namespace:         "default",
+					CreationTimestamp: metav1.NewTime(podTime),
+					OwnerReferences: []metav1.OwnerReference{
+						{Kind: "ReplicaSet", Name: "rs-1", Controller: ptr(true)},
+					},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: istioProxyContainerName, Image: "docker.io/istio/proxyv2:1.19.0"},
+					},
+				},
+			},
+		).
+		Build()
+
+	webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
+	scanner := NewPodScanner(fakeClient, webhook)
+	lastModifiedByRevision := map[string]time.Time{"default": configMapTime}
+	workloads, err := scanner.ScanOutdatedPods(context.Background(), IstioConfig{LastModifiedByRevision: lastModifiedByRevision}, ScanOptions{
+		IstiodConfigReadDelay: 10 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("ScanOutdatedPods: %v", err)
+	}
+	if len(workloads) != 1 {
+		t.Errorf("want 1 workload (pod in window should be scanned), got %d", len(workloads))
+	}
+}
+
+func testGetPodRevision_DoNotSkipWhenTagMWCModifiedAfterPod(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = appsv1.AddToScheme(scheme)
+
+	configMapTime := time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC)
+	podTime := time.Date(2024, 1, 15, 10, 0, 5, 0, time.UTC)
+	tagMWCTime := time.Date(2024, 1, 15, 10, 0, 15, 0, time.UTC)
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(
+			&corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "default",
+					Labels: map[string]string{"istio.io/rev": "stable"},
+				},
+			},
+			&appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{Name: "dep-stable", Namespace: "default"},
+				Spec: appsv1.DeploymentSpec{
+					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "test"}},
+					Template: corev1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "test"}},
+						Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx"}}},
+					},
+				},
+			},
+			&appsv1.ReplicaSet{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "rs-stable",
+					Namespace: "default",
+					OwnerReferences: []metav1.OwnerReference{
+						{Kind: "Deployment", Name: "dep-stable", Controller: ptr(true)},
+					},
+				},
+			},
+			&corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              "pod-stable",
+					Namespace:         "default",
+					CreationTimestamp: metav1.NewTime(podTime),
+					OwnerReferences: []metav1.OwnerReference{
+						{Kind: "ReplicaSet", Name: "rs-stable", Controller: ptr(true)},
+					},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: istioProxyContainerName, Image: "docker.io/istio/proxyv2:1.19.0"},
+					},
+				},
+			},
+		).
+		Build()
+
+	webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
+	scanner := NewPodScanner(fakeClient, webhook)
+	lastModifiedByRevision := map[string]time.Time{"1-29-0": configMapTime}
+	tagToRevision := map[string]string{"stable": "1-29-0"}
+	lastModifiedByTag := map[string]time.Time{"stable": tagMWCTime}
+	workloads, err := scanner.ScanOutdatedPods(context.Background(), IstioConfig{LastModifiedByRevision: lastModifiedByRevision, TagToRevision: tagToRevision, LastModifiedByTag: lastModifiedByTag}, ScanOptions{})
+	if err != nil {
+		t.Fatalf("ScanOutdatedPods: %v", err)
+	}
+	if len(workloads) != 1 {
+		t.Errorf("want 1 workload (tag MWC modified after pod - must scan), got %d", len(workloads))
+	}
+}
+
+func testGetPodRevision_FlagWorkloadWhenPodNoSidecarWebhookWouldInject(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = appsv1.AddToScheme(scheme)
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(
+			&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default", Labels: map[string]string{"istio-injection": "enabled"}}},
+			&appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{Name: "dep-no-sidecar", Namespace: "default"},
+				Spec: appsv1.DeploymentSpec{
+					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "test"}},
+					Template: corev1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "test"}},
+						Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx"}}},
+					},
+				},
+			},
+			&appsv1.ReplicaSet{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "rs-no-sidecar",
+					Namespace: "default",
+					OwnerReferences: []metav1.OwnerReference{
+						{Kind: "Deployment", Name: "dep-no-sidecar", Controller: ptr(true)},
+					},
+				},
+			},
+			&corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pod-no-sidecar",
+					Namespace: "default",
+					OwnerReferences: []metav1.OwnerReference{
+						{Kind: "ReplicaSet", Name: "rs-no-sidecar", Controller: ptr(true)},
+					},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "app", Image: "nginx"}},
+				},
+			},
+		).
+		Build()
+
+	webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
+	scanner := NewPodScanner(fakeClient, webhook)
+	lastModifiedByRevision := map[string]time.Time{}
+	workloads, err := scanner.ScanOutdatedPods(context.Background(), IstioConfig{LastModifiedByRevision: lastModifiedByRevision}, ScanOptions{})
+	if err != nil {
+		t.Fatalf("ScanOutdatedPods: %v", err)
+	}
+	if len(workloads) != 1 {
+		t.Errorf("want 1 workload (webhook would inject sidecar), got %d", len(workloads))
+	}
+	if len(workloads) > 0 && workloads[0].Name != "dep-no-sidecar" {
+		t.Errorf("want dep-no-sidecar, got %s", workloads[0].Name)
 	}
 }
 
 func TestGetPodRevision(t *testing.T) {
-	// getPodRevision is tested indirectly via ScanOutdatedPods; we test the behavior here
-	// by creating pods with different status annotations and verifying ScanOutdatedPods
-	// uses the correct revision for lookup.
-	t.Run("revision from sidecar status", func(t *testing.T) {
-		scheme := runtime.NewScheme()
-		_ = corev1.AddToScheme(scheme)
-		_ = appsv1.AddToScheme(scheme)
-
-		fakeClient := fake.NewClientBuilder().
-			WithScheme(scheme).
-			WithObjects(
-				&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default", Labels: map[string]string{"istio-injection": "enabled"}}},
-				&corev1.Pod{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "pod-canary",
-						Namespace: "default",
-						OwnerReferences: []metav1.OwnerReference{
-							{Kind: "ReplicaSet", Name: "rs-1", Controller: ptr(true)},
-						},
-					},
-					Spec: corev1.PodSpec{
-						Containers: []corev1.Container{
-							{Name: istioProxyContainerName, Image: "docker.io/istio/proxyv2:1.19.0"},
-						},
-					},
-				},
-				&appsv1.ReplicaSet{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "rs-1",
-						Namespace: "default",
-						OwnerReferences: []metav1.OwnerReference{
-							{Kind: "Deployment", Name: "dep-1", Controller: ptr(true)},
-						},
-					},
-				},
-				&appsv1.Deployment{
-					ObjectMeta: metav1.ObjectMeta{Name: "dep-1", Namespace: "default"},
-					Spec: appsv1.DeploymentSpec{
-						Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "test"}},
-						Template: corev1.PodTemplateSpec{
-							ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "test"}},
-							Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx"}}},
-						},
-					},
-				},
-			).
-			Build()
-
-		webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
-		scanner := NewPodScanner(fakeClient, webhook)
-		lastModifiedByRevision := map[string]time.Time{}
-		workloads, err := scanner.ScanOutdatedPods(context.Background(), lastModifiedByRevision, map[string]string{}, map[string]time.Time{}, ScanOptions{})
-		if err != nil {
-			t.Fatalf("ScanOutdatedPods: %v", err)
-		}
-		if len(workloads) != 1 {
-			t.Errorf("want 1 workload, got %d", len(workloads))
-		}
-		if len(workloads) > 0 && workloads[0].Name != "dep-1" {
-			t.Errorf("want dep-1, got %s", workloads[0].Name)
-		}
-	})
-
-	t.Run("skip pod with no workload owner", func(t *testing.T) {
-		scheme := runtime.NewScheme()
-		_ = corev1.AddToScheme(scheme)
-
-		fakeClient := fake.NewClientBuilder().
-			WithScheme(scheme).
-			WithObjects(
-				&corev1.Pod{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "pod-standalone",
-						Namespace: "default",
-					},
-					Spec: corev1.PodSpec{
-						Containers: []corev1.Container{
-							{Name: istioProxyContainerName, Image: "docker.io/istio/proxyv2:1.19.0"},
-						},
-					},
-				},
-			).
-			Build()
-
-		// Pod has no owner refs (standalone pod); we scan all pods but skip when no restartable workload
-		webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
-		scanner := NewPodScanner(fakeClient, webhook)
-		lastModifiedByRevision := map[string]time.Time{}
-		workloads, err := scanner.ScanOutdatedPods(context.Background(), lastModifiedByRevision, map[string]string{}, map[string]time.Time{}, ScanOptions{})
-		if err != nil {
-			t.Fatalf("ScanOutdatedPods: %v", err)
-		}
-		if len(workloads) != 0 {
-			t.Errorf("want 0 workloads (pod has no workload owner), got %d", len(workloads))
-		}
-	})
-
-	t.Run("skip pod with up-to-date image", func(t *testing.T) {
-		scheme := runtime.NewScheme()
-		_ = corev1.AddToScheme(scheme)
-		_ = appsv1.AddToScheme(scheme)
-
-		dep := &appsv1.Deployment{
-			ObjectMeta: metav1.ObjectMeta{Name: "dep-ok", Namespace: "default"},
-			Spec: appsv1.DeploymentSpec{
-				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "ok"}},
-				Template: corev1.PodTemplateSpec{
-					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "ok"}},
-					Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx"}}},
-				},
-			},
-		}
-		fakeClient := fake.NewClientBuilder().
-			WithScheme(scheme).
-			WithObjects(
-				&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default", Labels: map[string]string{"istio-injection": "enabled"}}},
-				dep,
-				&appsv1.ReplicaSet{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "rs-ok",
-						Namespace: "default",
-						OwnerReferences: []metav1.OwnerReference{
-							{Kind: "Deployment", Name: "dep-ok", Controller: ptr(true)},
-						},
-					},
-				},
-				&corev1.Pod{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "pod-ok",
-						Namespace: "default",
-						OwnerReferences: []metav1.OwnerReference{
-							{Kind: "ReplicaSet", Name: "rs-ok", Controller: ptr(true)},
-						},
-					},
-					Spec: corev1.PodSpec{
-						Containers: []corev1.Container{
-							{Name: istioProxyContainerName, Image: "docker.io/istio/proxyv2:1.20.1"},
-						},
-					},
-				},
-			).
-			Build()
-
-		// Webhook returns same image as current pod -> up to date
-		webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
-		scanner := NewPodScanner(fakeClient, webhook)
-		lastModifiedByRevision := map[string]time.Time{}
-		workloads, err := scanner.ScanOutdatedPods(context.Background(), lastModifiedByRevision, map[string]string{}, map[string]time.Time{}, ScanOptions{})
-		if err != nil {
-			t.Fatalf("ScanOutdatedPods: %v", err)
-		}
-		if len(workloads) != 0 {
-			t.Errorf("want 0 workloads (image matches webhook), got %d", len(workloads))
-		}
-	})
-
-	t.Run("skip pod created after ConfigMap last update", func(t *testing.T) {
-		scheme := runtime.NewScheme()
-		_ = corev1.AddToScheme(scheme)
-		_ = appsv1.AddToScheme(scheme)
-
-		configMapTime := time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC)
-		podTime := time.Date(2024, 1, 15, 11, 0, 0, 0, time.UTC) // pod created after ConfigMap
-
-		fakeClient := fake.NewClientBuilder().
-			WithScheme(scheme).
-			WithObjects(
-				&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default", Labels: map[string]string{"istio-injection": "enabled"}}},
-				&appsv1.Deployment{
-					ObjectMeta: metav1.ObjectMeta{Name: "dep-1", Namespace: "default"},
-					Spec: appsv1.DeploymentSpec{
-						Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "test"}},
-						Template: corev1.PodTemplateSpec{
-							ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "test"}},
-							Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx"}}},
-						},
-					},
-				},
-				&appsv1.ReplicaSet{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "rs-1",
-						Namespace: "default",
-						OwnerReferences: []metav1.OwnerReference{
-							{Kind: "Deployment", Name: "dep-1", Controller: ptr(true)},
-						},
-					},
-				},
-				&corev1.Pod{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:              "pod-new",
-						Namespace:         "default",
-						CreationTimestamp: metav1.NewTime(podTime),
-						OwnerReferences: []metav1.OwnerReference{
-							{Kind: "ReplicaSet", Name: "rs-1", Controller: ptr(true)},
-						},
-					},
-					Spec: corev1.PodSpec{
-						Containers: []corev1.Container{
-							{Name: istioProxyContainerName, Image: "docker.io/istio/proxyv2:1.19.0"},
-						},
-					},
-				},
-			).
-			Build()
-
-		// Pod has old image but was created after ConfigMap update -> skip (would have been injected with current config)
-		webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
-		scanner := NewPodScanner(fakeClient, webhook)
-		lastModifiedByRevision := map[string]time.Time{"default": configMapTime}
-		workloads, err := scanner.ScanOutdatedPods(context.Background(), lastModifiedByRevision, map[string]string{}, map[string]time.Time{}, ScanOptions{})
-		if err != nil {
-			t.Fatalf("ScanOutdatedPods: %v", err)
-		}
-		if len(workloads) != 0 {
-			t.Errorf("want 0 workloads (pod created after ConfigMap), got %d", len(workloads))
-		}
-	})
-
-	t.Run("scan pod created within IstiodConfigReadDelay window", func(t *testing.T) {
-		scheme := runtime.NewScheme()
-		_ = corev1.AddToScheme(scheme)
-		_ = appsv1.AddToScheme(scheme)
-
-		configMapTime := time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC)
-		// Pod created 5s after ConfigMap; with 10s delay, effectiveLastModified is 10:00:10, so we still scan
-		podTime := time.Date(2024, 1, 15, 10, 0, 5, 0, time.UTC)
-
-		fakeClient := fake.NewClientBuilder().
-			WithScheme(scheme).
-			WithObjects(
-				&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default", Labels: map[string]string{"istio-injection": "enabled"}}},
-				&appsv1.Deployment{
-					ObjectMeta: metav1.ObjectMeta{Name: "dep-1", Namespace: "default"},
-					Spec: appsv1.DeploymentSpec{
-						Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "test"}},
-						Template: corev1.PodTemplateSpec{
-							ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "test"}},
-							Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx"}}},
-						},
-					},
-				},
-				&appsv1.ReplicaSet{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "rs-1",
-						Namespace: "default",
-						OwnerReferences: []metav1.OwnerReference{
-							{Kind: "Deployment", Name: "dep-1", Controller: ptr(true)},
-						},
-					},
-				},
-				&corev1.Pod{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:              "pod-in-window",
-						Namespace:         "default",
-						CreationTimestamp: metav1.NewTime(podTime),
-						OwnerReferences: []metav1.OwnerReference{
-							{Kind: "ReplicaSet", Name: "rs-1", Controller: ptr(true)},
-						},
-					},
-					Spec: corev1.PodSpec{
-						Containers: []corev1.Container{
-							{Name: istioProxyContainerName, Image: "docker.io/istio/proxyv2:1.19.0"},
-						},
-					},
-				},
-			).
-			Build()
-
-		// Pod has old image, created 5s after ConfigMap; with 10s IstiodConfigReadDelay we still scan it
-		webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
-		scanner := NewPodScanner(fakeClient, webhook)
-		lastModifiedByRevision := map[string]time.Time{"default": configMapTime}
-		workloads, err := scanner.ScanOutdatedPods(context.Background(), lastModifiedByRevision, map[string]string{}, map[string]time.Time{}, ScanOptions{
-			IstiodConfigReadDelay: 10 * time.Second,
-		})
-		if err != nil {
-			t.Fatalf("ScanOutdatedPods: %v", err)
-		}
-		if len(workloads) != 1 {
-			t.Errorf("want 1 workload (pod in window should be scanned), got %d", len(workloads))
-		}
-	})
-
-	t.Run("do not skip when tag MWC was modified after pod was created", func(t *testing.T) {
-		scheme := runtime.NewScheme()
-		_ = corev1.AddToScheme(scheme)
-		_ = appsv1.AddToScheme(scheme)
-
-		configMapTime := time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC)
-		podTime := time.Date(2024, 1, 15, 10, 0, 5, 0, time.UTC)
-		tagMWCTime := time.Date(2024, 1, 15, 10, 0, 15, 0, time.UTC) // Tag MWC modified after pod
-
-		fakeClient := fake.NewClientBuilder().
-			WithScheme(scheme).
-			WithObjects(
-				&corev1.Namespace{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:   "default",
-						Labels: map[string]string{"istio.io/rev": "stable"},
-					},
-				},
-				&appsv1.Deployment{
-					ObjectMeta: metav1.ObjectMeta{Name: "dep-stable", Namespace: "default"},
-					Spec: appsv1.DeploymentSpec{
-						Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "test"}},
-						Template: corev1.PodTemplateSpec{
-							ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "test"}},
-							Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx"}}},
-						},
-					},
-				},
-				&appsv1.ReplicaSet{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "rs-stable",
-						Namespace: "default",
-						OwnerReferences: []metav1.OwnerReference{
-							{Kind: "Deployment", Name: "dep-stable", Controller: ptr(true)},
-						},
-					},
-				},
-				&corev1.Pod{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:              "pod-stable",
-						Namespace:         "default",
-						CreationTimestamp: metav1.NewTime(podTime),
-						OwnerReferences: []metav1.OwnerReference{
-							{Kind: "ReplicaSet", Name: "rs-stable", Controller: ptr(true)},
-						},
-					},
-					Spec: corev1.PodSpec{
-						Containers: []corev1.Container{
-							{Name: istioProxyContainerName, Image: "docker.io/istio/proxyv2:1.19.0"},
-						},
-					},
-				},
-			).
-			Build()
-
-		// Pod created after ConfigMap (1-29-0) -> ConfigMap skip would apply. But tag "stable" MWC was
-		// modified after pod was created, so tag-to-revision mapping may have changed - must scan.
-		webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
-		scanner := NewPodScanner(fakeClient, webhook)
-		lastModifiedByRevision := map[string]time.Time{"1-29-0": configMapTime}
-		tagToRevision := map[string]string{"stable": "1-29-0"}
-		lastModifiedByTag := map[string]time.Time{"stable": tagMWCTime}
-		workloads, err := scanner.ScanOutdatedPods(context.Background(), lastModifiedByRevision, tagToRevision, lastModifiedByTag, ScanOptions{})
-		if err != nil {
-			t.Fatalf("ScanOutdatedPods: %v", err)
-		}
-		if len(workloads) != 1 {
-			t.Errorf("want 1 workload (tag MWC modified after pod - must scan), got %d", len(workloads))
-		}
-	})
-
-	t.Run("flag workload when pod has no sidecar but webhook would inject", func(t *testing.T) {
-		scheme := runtime.NewScheme()
-		_ = corev1.AddToScheme(scheme)
-		_ = appsv1.AddToScheme(scheme)
-
-		fakeClient := fake.NewClientBuilder().
-			WithScheme(scheme).
-			WithObjects(
-				&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default", Labels: map[string]string{"istio-injection": "enabled"}}},
-				&appsv1.Deployment{
-					ObjectMeta: metav1.ObjectMeta{Name: "dep-no-sidecar", Namespace: "default"},
-					Spec: appsv1.DeploymentSpec{
-						Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "test"}},
-						Template: corev1.PodTemplateSpec{
-							ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "test"}},
-							Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx"}}},
-						},
-					},
-				},
-				&appsv1.ReplicaSet{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "rs-no-sidecar",
-						Namespace: "default",
-						OwnerReferences: []metav1.OwnerReference{
-							{Kind: "Deployment", Name: "dep-no-sidecar", Controller: ptr(true)},
-						},
-					},
-				},
-				&corev1.Pod{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "pod-no-sidecar",
-						Namespace: "default",
-						OwnerReferences: []metav1.OwnerReference{
-							{Kind: "ReplicaSet", Name: "rs-no-sidecar", Controller: ptr(true)},
-						},
-					},
-					Spec: corev1.PodSpec{
-						Containers: []corev1.Container{{Name: "app", Image: "nginx"}},
-					},
-				},
-			).
-			Build()
-
-		// Pod has no istio-proxy; webhook would inject
-		webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
-		scanner := NewPodScanner(fakeClient, webhook)
-		lastModifiedByRevision := map[string]time.Time{}
-		workloads, err := scanner.ScanOutdatedPods(context.Background(), lastModifiedByRevision, map[string]string{}, map[string]time.Time{}, ScanOptions{})
-		if err != nil {
-			t.Fatalf("ScanOutdatedPods: %v", err)
-		}
-		if len(workloads) != 1 {
-			t.Errorf("want 1 workload (webhook would inject sidecar), got %d", len(workloads))
-		}
-		if len(workloads) > 0 && workloads[0].Name != "dep-no-sidecar" {
-			t.Errorf("want dep-no-sidecar, got %s", workloads[0].Name)
-		}
-	})
+	tests := []struct {
+		name string
+		run  func(t *testing.T)
+	}{
+		{"revision from sidecar status", testGetPodRevision_RevisionFromSidecarStatus},
+		{"skip pod with no workload owner", testGetPodRevision_SkipNoWorkloadOwner},
+		{"skip pod with up-to-date image", testGetPodRevision_SkipUpToDateImage},
+		{"skip pod created after ConfigMap last update", testGetPodRevision_SkipPodCreatedAfterConfigMap},
+		{"scan pod created within IstiodConfigReadDelay window", testGetPodRevision_ScanPodInIstiodConfigReadDelayWindow},
+		{"do not skip when tag MWC was modified after pod was created", testGetPodRevision_DoNotSkipWhenTagMWCModifiedAfterPod},
+		{"flag workload when pod has no sidecar but webhook would inject", testGetPodRevision_FlagWorkloadWhenPodNoSidecarWebhookWouldInject},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, tt.run)
+	}
 }
 
 func TestScanOutdatedPods_skipNamespaces(t *testing.T) {
@@ -610,7 +583,7 @@ func TestScanOutdatedPods_skipNamespaces(t *testing.T) {
 		webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
 		scanner := NewPodScanner(fakeClient, webhook)
 		lastModifiedByRevision := map[string]time.Time{}
-		workloads, err := scanner.ScanOutdatedPods(context.Background(), lastModifiedByRevision, map[string]string{}, map[string]time.Time{}, ScanOptions{
+		workloads, err := scanner.ScanOutdatedPods(context.Background(), IstioConfig{LastModifiedByRevision: lastModifiedByRevision}, ScanOptions{
 			SkipNamespaces: []string{"kube-system"},
 		})
 		if err != nil {
@@ -707,7 +680,7 @@ func TestScanOutdatedPods_limitToNamespaces(t *testing.T) {
 
 		webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
 		scanner := NewPodScanner(fakeClient, webhook)
-		workloads, err := scanner.ScanOutdatedPods(context.Background(), map[string]time.Time{}, map[string]string{}, map[string]time.Time{}, ScanOptions{
+		workloads, err := scanner.ScanOutdatedPods(context.Background(), IstioConfig{}, ScanOptions{
 			LimitToNamespaces: []string{"ns1", "ns2"},
 		})
 		if err != nil {
@@ -767,7 +740,7 @@ func TestScanOutdatedPods_StatefulSetWorkload(t *testing.T) {
 
 	webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
 	scanner := NewPodScanner(fakeClient, webhook)
-	workloads, err := scanner.ScanOutdatedPods(context.Background(), map[string]time.Time{}, map[string]string{}, map[string]time.Time{}, ScanOptions{})
+	workloads, err := scanner.ScanOutdatedPods(context.Background(), IstioConfig{}, ScanOptions{})
 	if err != nil {
 		t.Fatalf("ScanOutdatedPods: %v", err)
 	}
@@ -820,7 +793,7 @@ func TestScanOutdatedPods_DaemonSetWorkload(t *testing.T) {
 
 	webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
 	scanner := NewPodScanner(fakeClient, webhook)
-	workloads, err := scanner.ScanOutdatedPods(context.Background(), map[string]time.Time{}, map[string]string{}, map[string]time.Time{}, ScanOptions{})
+	workloads, err := scanner.ScanOutdatedPods(context.Background(), IstioConfig{}, ScanOptions{})
 	if err != nil {
 		t.Fatalf("ScanOutdatedPods: %v", err)
 	}
@@ -911,7 +884,7 @@ func TestScanOutdatedPods_tagResolution(t *testing.T) {
 
 		scanner := NewPodScanner(fakeClient, webhook)
 		tagToRevision := map[string]string{"canary": "1-20"}
-		workloads, err := scanner.ScanOutdatedPods(context.Background(), map[string]time.Time{}, tagToRevision, map[string]time.Time{}, ScanOptions{})
+		workloads, err := scanner.ScanOutdatedPods(context.Background(), IstioConfig{TagToRevision: tagToRevision}, ScanOptions{})
 		if err != nil {
 			t.Fatalf("ScanOutdatedPods: %v", err)
 		}
@@ -976,7 +949,7 @@ func TestScanOutdatedPods_tagResolution(t *testing.T) {
 
 		scanner := NewPodScanner(fakeClient, webhook)
 		tagToRevision := map[string]string{"canary": "1-20"}
-		workloads, err := scanner.ScanOutdatedPods(context.Background(), map[string]time.Time{}, tagToRevision, map[string]time.Time{}, ScanOptions{})
+		workloads, err := scanner.ScanOutdatedPods(context.Background(), IstioConfig{TagToRevision: tagToRevision}, ScanOptions{})
 		if err != nil {
 			t.Fatalf("ScanOutdatedPods: %v", err)
 		}
@@ -1042,7 +1015,7 @@ func TestScanOutdatedPods_istioInjectionLabel(t *testing.T) {
 			Build()
 
 		scanner := NewPodScanner(fakeClient, webhook)
-		workloads, err := scanner.ScanOutdatedPods(context.Background(), map[string]time.Time{}, map[string]string{}, map[string]time.Time{}, ScanOptions{})
+		workloads, err := scanner.ScanOutdatedPods(context.Background(), IstioConfig{}, ScanOptions{})
 		if err != nil {
 			t.Fatalf("ScanOutdatedPods: %v", err)
 		}
@@ -1101,7 +1074,7 @@ func TestScanOutdatedPods_istioInjectionLabel(t *testing.T) {
 
 		webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
 		scanner := NewPodScanner(fakeClient, webhook)
-		workloads, err := scanner.ScanOutdatedPods(context.Background(), map[string]time.Time{}, map[string]string{}, map[string]time.Time{}, ScanOptions{})
+		workloads, err := scanner.ScanOutdatedPods(context.Background(), IstioConfig{}, ScanOptions{})
 		if err != nil {
 			t.Fatalf("ScanOutdatedPods: %v", err)
 		}
@@ -1163,7 +1136,7 @@ func TestScanOutdatedPods_istioInjectionLabel(t *testing.T) {
 
 		scanner := NewPodScanner(fakeClient, webhook)
 		tagToRevision := map[string]string{"canary": "1-20"}
-		workloads, err := scanner.ScanOutdatedPods(context.Background(), map[string]time.Time{}, tagToRevision, map[string]time.Time{}, ScanOptions{})
+		workloads, err := scanner.ScanOutdatedPods(context.Background(), IstioConfig{TagToRevision: tagToRevision}, ScanOptions{})
 		if err != nil {
 			t.Fatalf("ScanOutdatedPods: %v", err)
 		}

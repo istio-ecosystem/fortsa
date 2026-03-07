@@ -150,18 +150,26 @@ func (r *IstioChangeReconciler) reconcileAll(ctx context.Context, limitToNamespa
 		return ctrl.Result{}, fmt.Errorf("fetch tag-to-revision mapping: %w", err)
 	}
 
-	return r.scanAndAnnotate(ctx, lastModifiedByRevision, tagToRevision, lastModifiedByTag, limitToNamespaces)
+	cfg := podscanner.IstioConfig{
+		LastModifiedByRevision: lastModifiedByRevision,
+		TagToRevision:          tagToRevision,
+		LastModifiedByTag:      lastModifiedByTag,
+	}
+	return r.scanAndAnnotate(ctx, cfg, limitToNamespaces)
 }
 
 // scanAndAnnotate scans for outdated pods and annotates workloads to trigger restarts.
 // limitToNamespaces, when non-empty, restricts scanning to those namespaces only.
-func (r *IstioChangeReconciler) scanAndAnnotate(ctx context.Context, lastModifiedByRevision map[string]time.Time, tagToRevision map[string]string, lastModifiedByTag map[string]time.Time, limitToNamespaces []string) (ctrl.Result, error) {
+func (r *IstioChangeReconciler) scanAndAnnotate(ctx context.Context, cfg podscanner.IstioConfig, limitToNamespaces []string) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-	if tagToRevision == nil {
-		tagToRevision = map[string]string{}
+	if cfg.TagToRevision == nil {
+		cfg.TagToRevision = map[string]string{}
 	}
-	if lastModifiedByRevision == nil {
-		lastModifiedByRevision = map[string]time.Time{}
+	if cfg.LastModifiedByRevision == nil {
+		cfg.LastModifiedByRevision = map[string]time.Time{}
+	}
+	if cfg.LastModifiedByTag == nil {
+		cfg.LastModifiedByTag = map[string]time.Time{}
 	}
 	opts := podscanner.ScanOptions{
 		CompareHub:            r.compareHub,
@@ -169,7 +177,7 @@ func (r *IstioChangeReconciler) scanAndAnnotate(ctx context.Context, lastModifie
 		SkipNamespaces:        r.skipNamespaces,
 		LimitToNamespaces:     limitToNamespaces,
 	}
-	workloads, err := r.scanner.ScanOutdatedPods(ctx, lastModifiedByRevision, tagToRevision, lastModifiedByTag, opts)
+	workloads, err := r.scanner.ScanOutdatedPods(ctx, cfg, opts)
 	if err != nil {
 		logger.Error(err, "failed to scan pods")
 		return ctrl.Result{}, fmt.Errorf("scan outdated pods: %w", err)
