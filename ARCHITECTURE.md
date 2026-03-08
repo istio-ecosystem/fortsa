@@ -21,13 +21,14 @@ This document describes how Fortsa works internally: its components, data flows,
 fortsa/
 ├── cmd/main.go              # Entry point, flag parsing, manager setup
 ├── internal/
+│   ├── constants/           # Shared constants (istio-system, prefixes, labels, annotation key)
 │   ├── controller/          # IstioChangeReconciler, reconcile routing
 │   ├── mwc/                 # MWC predicate, tag mapping fetch, reconcile request
-│   ├── namespace/            # Namespace predicates, reconcile request
+│   ├── namespace/           # Namespace predicates, reconcile request
 │   ├── periodic/            # Periodic reconcile source, reconcile request
-│   ├── podscanner/          # Pod scanning, outdated sidecar detection
+│   ├── podscanner/           # Pod scanning, outdated sidecar detection
 │   ├── annotator/           # Workload annotation for restarts
-│   ├── configmap/           # ConfigMap predicate, reconcile request, Istio sidecar injector parsing
+│   ├── configmap/           # ConfigMap predicate, reconcile request, parser, fetch (BuildLastModifiedByRevision)
 │   └── webhook/             # Istio injection webhook client
 ├── config/                  # Kustomize manifests (RBAC, manager, Prometheus)
 ├── helm/src/chart/          # Helm chart for deployment
@@ -41,11 +42,11 @@ controller → annotator, configmap, mwc, periodic, podscanner, webhook
 mwc        → (k8s client)
 namespace  → (controller-runtime)
 periodic   → (controller-runtime)
-podscanner → configmap, webhook
+podscanner → webhook
 annotator  → podscanner
 ```
 
-The `configmap` package provides both the ConfigMap trigger (Filter, ReconcileRequest) and parser (ParseConfigMapValues, GetConfigMapLastModified). The `mwc` package provides the MWC trigger (Filter, ReconcileRequest) and tag mapping fetch (FetchTagToRevisionAndLastModified). ConfigMap and MWC both use the same reconcile request name (`__istio_change__`) so controller-runtime deduplicates their events.
+The `configmap` package provides the ConfigMap trigger (Filter, ReconcileRequest, ReconcileRequestName), parser (ParseConfigMapValues, GetConfigMapLastModified), and fetch (BuildLastModifiedByRevision). BuildLastModifiedByRevision lists istio-sidecar-injector ConfigMaps, parses each, and returns revision -> LastModified; no cache, built fresh on each reconcile. The `mwc` package provides the MWC trigger (Filter, ReconcileRequest) and tag mapping fetch (FetchTagToRevisionAndLastModified). ConfigMap and MWC both use the same reconcile request name (`__istio_change__`) so controller-runtime deduplicates their events.
 
 ## Component Architecture
 
@@ -117,7 +118,7 @@ flowchart TD
     CheckName -->|"__periodic_reconcile__"| ReconcileAll[reconcileAll]
     CheckName -->|"__istio_change__"| ReconcileAll
     CheckName -->|Namespace only| ReconcileAllNS[reconcileAll with namespaces]
-    CheckName -->|Other| Return[Return]
+    CheckName -->|Other| LogIgnore[log error and ignore]
     ReconcileAll --> AwaitDelay[awaitIstiodConfigReadDelay]
     ReconcileAllNS --> AwaitDelay
     AwaitDelay --> BuildRev[Build lastModifiedByRevision from ConfigMaps]
@@ -130,13 +131,14 @@ flowchart TD
 
 | Request | Trigger | Handler |
 | ------- | ------- | ------- |
-| `__periodic_reconcile__` | Periodic ticker | `reconcileAll()` — full scan of all ConfigMaps |
-| `__istio_change__` | ConfigMap or MWC change | `reconcileAll()` — build last-modified from ConfigMaps and MWCs, delay, scan |
+| `__periodic_reconcile__` | Periodic ticker | `reconcileAll()` — await delay, build last-modified from ConfigMaps and MWCs, scan |
+| `__istio_change__` | ConfigMap or MWC change | `reconcileAll()` — await delay, build last-modified from ConfigMaps and MWCs, scan |
 | Namespace-only (req.Name = namespace, req.Namespace empty) | Namespace label change | `reconcileAll(ctx, []string{namespace})` — scan only that namespace |
+| Other | (any) | Log error, ignore, no requeue |
 
 ConfigMap and MWC watches both enqueue the same request name `__istio_change__`. Controller-runtime deduplicates by NamespacedName, so multiple rapid events coalesce into a single reconcile run.
 
-All paths converge on `reconcileAll()`, which builds last-modified data from ConfigMaps and MWCs, then calls `scanAndAnnotate()` → `annotateWorkloadsWithDelay()`.
+All paths converge on `reconcileAll()`, which awaits the Istiod config read delay, builds last-modified data from ConfigMaps and MWCs, then calls `scanAndAnnotate()` → `annotateWorkloadsWithDelay()`.
 
 ## Per-Pod Outdated Detection Flow
 
@@ -184,11 +186,10 @@ flowchart TD
 
 ## ConfigMap Parser
 
-[internal/configmap/configmap_parser.go](internal/configmap/configmap_parser.go) parses Istio sidecar injector ConfigMaps:
+The `configmap` package parses Istio sidecar injector ConfigMaps and builds last-modified data:
 
-- **Input**: ConfigMap with `values` key containing JSON (e.g., `istio-sidecar-injector`, `istio-sidecar-injector-default`)
-- **Extracts**: `Revision`, `Hub`, `Tag`, `Image` (global.proxy.image) from the values JSON; revision can also come from ConfigMap label `istio.io/rev`
-- **LastModified**: Uses `metadata.managedFields` timestamps when available; falls back to `creationTimestamp`
+- **[configmap_parser.go](internal/configmap/configmap_parser.go)**: `ParseConfigMapValues` extracts `Revision`, `Hub`, `Tag`, `Image` (global.proxy.image) from the values JSON; revision can also come from ConfigMap label `istio.io/rev`. `GetConfigMapLastModified` uses `metadata.managedFields` timestamps when available; falls back to `creationTimestamp`
+- **[fetch.go](internal/configmap/fetch.go)**: `BuildLastModifiedByRevision` lists istio-sidecar-injector ConfigMaps in istio-system, parses each via ParseConfigMapValues, returns revision -> LastModified. No cache; invoked by reconciler on each reconcile
 
 ## Workload Annotator
 
@@ -225,6 +226,6 @@ flowchart TD
 
 The reconciler builds `lastModifiedByRevision` (revision -> ConfigMap LastModified) from the current istio-sidecar-injector ConfigMaps and passes it to the pod scanner for skip logic. Pods created after config change + IstiodConfigReadDelay are skipped (they may already have the correct sidecar).
 
-- **reconcileAll**: Builds the map inline from the ConfigMap list before scanning. When limitToNamespaces is nil, scans all namespaces; when non-nil, restricts to those namespaces.
+- **reconcileAll**: First awaits IstiodConfigReadDelay (so Istiod can read updated config). Then calls `configmap.BuildLastModifiedByRevision` to build the map from the current ConfigMap list. No cache; the map is built fresh on each reconcile. When limitToNamespaces is nil, scans all namespaces; when non-nil, restricts to those namespaces.
 
 Deduplication comes from the shared request name `__istio_change__`: multiple ConfigMap and MWC watch events coalesce into one reconcile before the workqueue processes them.
