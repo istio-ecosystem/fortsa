@@ -107,7 +107,7 @@ func (r *IstioChangeReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return r.reconcileAll(ctx, nil)
 	}
 
-	// ConfigMap change: list matching ConfigMaps, refresh cache, and scan
+	// Istio config change: reconcile all pods in all namespaces
 	if req.Name == configmap.ReconcileRequestName() {
 		log.FromContext(ctx).Info("Istio change, reconciling")
 		return r.reconcileAll(ctx, nil)
