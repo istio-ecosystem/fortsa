@@ -21,14 +21,21 @@ import (
 	"fmt"
 	"time"
 
+	admissionregv1 "k8s.io/api/admissionregistration/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/istio-ecosystem/fortsa/internal/annotator"
 	"github.com/istio-ecosystem/fortsa/internal/configmap"
 	"github.com/istio-ecosystem/fortsa/internal/mwc"
+	"github.com/istio-ecosystem/fortsa/internal/namespace"
 	"github.com/istio-ecosystem/fortsa/internal/periodic"
 	"github.com/istio-ecosystem/fortsa/internal/podscanner"
 	"github.com/istio-ecosystem/fortsa/internal/webhook"
@@ -65,6 +72,7 @@ type ReconcilerOptions struct {
 	AnnotationCooldown    time.Duration
 	SkipNamespaces        []string
 	WebhookCaller         webhook.WebhookCaller
+	ReconcilePeriod       time.Duration
 }
 
 // IstioChangeReconciler reconciles Istio sidecar injector ConfigMaps and related changes
@@ -80,6 +88,45 @@ type IstioChangeReconciler struct {
 	restartDelay          time.Duration
 	istiodConfigReadDelay time.Duration
 	skipNamespaces        []string
+	reconcilePeriod       time.Duration
+}
+
+// SetupIstioChangeController registers the istio_change controller with the manager,
+// including watches for ConfigMaps, MutatingWebhookConfigurations, Namespaces, and
+// optionally a periodic reconcile source when reconcilePeriod > 0.
+func SetupIstioChangeController(mgr ctrl.Manager, reconciler *IstioChangeReconciler) error {
+	b := ctrl.NewControllerManagedBy(mgr).
+		Named("istio_change").
+		Watches(
+			&corev1.ConfigMap{},
+			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+				log.FromContext(ctx).V(1).Info("configmap change detected", "ConfigMap", obj.GetName())
+				return []reconcile.Request{configmap.ReconcileRequest()}
+			}),
+			builder.WithPredicates(predicate.NewPredicateFuncs(configmap.Filter())),
+		).
+		Watches(
+			&admissionregv1.MutatingWebhookConfiguration{},
+			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+				log.FromContext(ctx).V(1).Info("mutating webhook configuration change detected",
+					"MutatingWebhookConfiguration", obj.GetName(),
+					"Namespace", obj.GetNamespace())
+				return []reconcile.Request{mwc.ReconcileRequest()}
+			}),
+			builder.WithPredicates(predicate.NewPredicateFuncs(mwc.Filter())),
+		).
+		Watches(
+			&corev1.Namespace{},
+			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+				log.FromContext(ctx).V(1).Info("namespace label change detected", "Namespace", obj.GetName())
+				return []reconcile.Request{namespace.ReconcileRequest(obj.GetName())}
+			}),
+			builder.WithPredicates(namespace.Filter()),
+		)
+	if reconciler.reconcilePeriod > 0 {
+		b = b.WatchesRawSource(periodic.NewReconcileSource(reconciler.reconcilePeriod))
+	}
+	return b.Complete(reconciler)
 }
 
 // NewIstioChangeReconciler creates a new IstioChangeReconciler from the given options.

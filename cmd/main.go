@@ -17,7 +17,6 @@ limitations under the License.
 package main
 
 import (
-	"context"
 	"crypto/tls"
 	"flag"
 	"fmt"
@@ -32,32 +31,21 @@ import (
 
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
-	admissionregv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	crwebhook "sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	// +kubebuilder:scaffold:imports
 
-	"github.com/istio-ecosystem/fortsa/internal/configmap"
 	"github.com/istio-ecosystem/fortsa/internal/controller"
-	"github.com/istio-ecosystem/fortsa/internal/mwc"
-	"github.com/istio-ecosystem/fortsa/internal/namespace"
-	"github.com/istio-ecosystem/fortsa/internal/periodic"
 	"github.com/istio-ecosystem/fortsa/internal/webhook"
 )
 
@@ -262,7 +250,6 @@ func main() {
 	}
 
 	dryRun := viper.GetBool("dry-run")
-	webhookClient := webhook.NewWebhookClient(mgr.GetClient())
 	reconciler := controller.NewIstioChangeReconciler(controller.ReconcilerOptions{
 		Client:                mgr.GetClient(),
 		Scheme:                mgr.GetScheme(),
@@ -272,41 +259,11 @@ func main() {
 		IstiodConfigReadDelay: viper.GetDuration("istiod-config-read-delay"),
 		AnnotationCooldown:    viper.GetDuration("annotation-cooldown"),
 		SkipNamespaces:        parseSkipNamespaces(viper.GetString("skip-namespaces")),
-		WebhookCaller:         webhookClient,
+		WebhookCaller:         webhook.NewWebhookClient(mgr.GetClient()),
+		ReconcilePeriod:       viper.GetDuration("reconcile-period"),
 	})
 
-	fortsaController := ctrl.NewControllerManagedBy(mgr).
-		Named("istio_change").
-		Watches(
-			&corev1.ConfigMap{},
-			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
-				log.FromContext(ctx).V(1).Info("configmap change detected", "ConfigMap", obj.GetName())
-				return []reconcile.Request{configmap.ReconcileRequest()}
-			}),
-			builder.WithPredicates(predicate.NewPredicateFuncs(configmap.Filter())),
-		).
-		Watches(
-			&admissionregv1.MutatingWebhookConfiguration{},
-			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
-				log.FromContext(ctx).V(1).Info("mutating webhook configuration change detected",
-					"MutatingWebhookConfiguration", obj.GetName(),
-					"Namespace", obj.GetNamespace())
-				return []reconcile.Request{mwc.ReconcileRequest()}
-			}),
-			builder.WithPredicates(predicate.NewPredicateFuncs(mwc.Filter())),
-		).
-		Watches(
-			&corev1.Namespace{},
-			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
-				log.FromContext(ctx).V(1).Info("namespace label change detected", "Namespace", obj.GetName())
-				return []reconcile.Request{namespace.ReconcileRequest(obj.GetName())}
-			}),
-			builder.WithPredicates(namespace.Filter()),
-		)
-	if reconcilePeriod := viper.GetDuration("reconcile-period"); reconcilePeriod > 0 {
-		fortsaController = fortsaController.WatchesRawSource(periodic.NewReconcileSource(reconcilePeriod))
-	}
-	err = fortsaController.Complete(reconciler)
+	err = controller.SetupIstioChangeController(mgr, reconciler)
 	if err != nil {
 		setupLog.Error(err, "unable to create controller")
 		os.Exit(1)
