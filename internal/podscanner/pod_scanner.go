@@ -93,9 +93,15 @@ type PodScanner struct {
 	webhookCaller webhook.WebhookCaller
 }
 
-// NewPodScanner creates a new PodScanner.
-func NewPodScanner(c client.Client, webhookCaller webhook.WebhookCaller) *PodScanner {
+// newPodScanner creates a PodScanner with the given client and webhook caller.
+// Used by tests to inject fake webhook callers; production code uses NewPodScanner.
+func newPodScanner(c client.Client, webhookCaller webhook.WebhookCaller) *PodScanner {
 	return &PodScanner{client: c, webhookCaller: webhookCaller}
+}
+
+// NewPodScanner creates a new PodScanner that uses the Istio injection webhook.
+func NewPodScanner(c client.Client) *PodScanner {
+	return newPodScanner(c, webhook.NewWebhookClient(c))
 }
 
 // WorkloadRef identifies a Deployment, StatefulSet, or DaemonSet.

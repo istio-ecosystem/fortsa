@@ -38,7 +38,6 @@ import (
 	"github.com/istio-ecosystem/fortsa/internal/namespace"
 	"github.com/istio-ecosystem/fortsa/internal/periodic"
 	"github.com/istio-ecosystem/fortsa/internal/podscanner"
-	"github.com/istio-ecosystem/fortsa/internal/webhook"
 )
 
 // waitOrContextDone waits for d or until ctx is cancelled.
@@ -130,11 +129,10 @@ func SetupIstioChangeController(mgr ctrl.Manager, reconciler *IstioChangeReconci
 
 // NewIstioChangeReconciler creates a new IstioChangeReconciler from the given options.
 func NewIstioChangeReconciler(opts ReconcilerOptions) *IstioChangeReconciler {
-	webhookCaller := webhook.NewWebhookClient(opts.Client)
 	return &IstioChangeReconciler{
 		Client:                opts.Client,
 		Scheme:                opts.Scheme,
-		scanner:               podscanner.NewPodScanner(opts.Client, webhookCaller),
+		scanner:               podscanner.NewPodScanner(opts.Client),
 		annotator:             annotator.NewWorkloadAnnotator(opts.Client, opts.AnnotationCooldown),
 		dryRun:                opts.DryRun,
 		compareHub:            opts.CompareHub,
