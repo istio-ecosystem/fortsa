@@ -46,7 +46,6 @@ import (
 	// +kubebuilder:scaffold:imports
 
 	"github.com/istio-ecosystem/fortsa/internal/controller"
-	"github.com/istio-ecosystem/fortsa/internal/webhook"
 )
 
 var (
@@ -259,7 +258,6 @@ func main() {
 		IstiodConfigReadDelay: viper.GetDuration("istiod-config-read-delay"),
 		AnnotationCooldown:    viper.GetDuration("annotation-cooldown"),
 		SkipNamespaces:        parseSkipNamespaces(viper.GetString("skip-namespaces")),
-		WebhookCaller:         webhook.NewWebhookClient(mgr.GetClient()),
 		ReconcilePeriod:       viper.GetDuration("reconcile-period"),
 	})
 

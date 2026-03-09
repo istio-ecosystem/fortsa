@@ -71,7 +71,6 @@ type ReconcilerOptions struct {
 	IstiodConfigReadDelay time.Duration
 	AnnotationCooldown    time.Duration
 	SkipNamespaces        []string
-	WebhookCaller         webhook.WebhookCaller
 	ReconcilePeriod       time.Duration
 }
 
@@ -131,16 +130,18 @@ func SetupIstioChangeController(mgr ctrl.Manager, reconciler *IstioChangeReconci
 
 // NewIstioChangeReconciler creates a new IstioChangeReconciler from the given options.
 func NewIstioChangeReconciler(opts ReconcilerOptions) *IstioChangeReconciler {
+	webhookCaller := webhook.NewWebhookClient(opts.Client)
 	return &IstioChangeReconciler{
 		Client:                opts.Client,
 		Scheme:                opts.Scheme,
-		scanner:               podscanner.NewPodScanner(opts.Client, opts.WebhookCaller),
+		scanner:               podscanner.NewPodScanner(opts.Client, webhookCaller),
 		annotator:             annotator.NewWorkloadAnnotator(opts.Client, opts.AnnotationCooldown),
 		dryRun:                opts.DryRun,
 		compareHub:            opts.CompareHub,
 		restartDelay:          opts.RestartDelay,
 		istiodConfigReadDelay: opts.IstiodConfigReadDelay,
 		skipNamespaces:        opts.SkipNamespaces,
+		reconcilePeriod:       opts.ReconcilePeriod,
 	}
 }
 
