@@ -38,12 +38,15 @@ fortsa/
 **Package dependency graph**:
 
 ```text
-controller → annotator, configmap, mwc, periodic, podscanner, webhook
+main       → controller
+controller → annotator, configmap, mwc, namespace, periodic, podscanner
+annotator  → (k8s client)
+configmap  → (k8s client)
 mwc        → (k8s client)
 namespace  → (controller-runtime)
 periodic   → (controller-runtime)
 podscanner → webhook
-annotator  → podscanner
+webhook    → (k8s client)
 ```
 
 The `configmap` package provides the ConfigMap trigger (Filter, ReconcileRequest, ReconcileRequestName), parser (ParseConfigMapValues, GetConfigMapLastModified), and fetch (BuildLastModifiedByRevision). BuildLastModifiedByRevision lists istio-sidecar-injector ConfigMaps, parses each, and returns revision -> LastModified; no cache, built fresh on each reconcile. The `mwc` package provides the MWC trigger (Filter, ReconcileRequest) and tag mapping fetch (FetchTagToRevisionAndLastModified). ConfigMap and MWC both use the same reconcile request name (`__istio_change__`) so controller-runtime deduplicates their events.
@@ -102,8 +105,8 @@ The application starts in [cmd/main.go](cmd/main.go) with the following sequence
 1. **Parse flags**: `--dry-run`, `--compare-hub`, `--restart-delay`, `--istiod-config-read-delay`, `--reconcile-period`, `--annotation-cooldown`, `--skip-namespaces`, TLS paths for webhook and metrics
 2. **Register scheme**: `clientgoscheme` and `corev1` for Kubernetes API types
 3. **Create Manager**: controller-runtime Manager with leader election (`71f32f9d.fortsa.scaffidi.net`), metrics on `:8080`, health probes on `:8081`
-4. **Instantiate components**: `WebhookClient` and `IstioChangeReconciler` (which creates `PodScanner` and `WorkloadAnnotator` internally)
-5. **Build controller**: `Watches` for ConfigMap (with predicate), MutatingWebhookConfiguration (with predicate), Namespace (with predicate), and optional periodic source. No primary `For` resource.
+4. **Instantiate reconciler**: `controller.NewIstioChangeReconciler` (which creates `PodScanner` and `WorkloadAnnotator` internally; `PodScanner` constructs the Istio webhook client)
+5. **Register controller**: `controller.SetupIstioChangeController` registers watches for ConfigMap (with predicate), MutatingWebhookConfiguration (with predicate), Namespace (with predicate), and optional periodic source. No primary `For` resource.
 6. **Add health checks**: `healthz.Ping` for healthz and readyz
 7. **Start manager**: `mgr.Start(ctrl.SetupSignalHandler())`
 

@@ -124,7 +124,7 @@ func testGetPodRevision_RevisionFromSidecarStatus(t *testing.T) {
 		Build()
 
 	webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
-	scanner := NewPodScanner(fakeClient, webhook)
+	scanner := newPodScanner(fakeClient, webhook)
 	lastModifiedByRevision := map[string]time.Time{}
 	workloads, err := scanner.ScanOutdatedPods(context.Background(), IstioConfig{LastModifiedByRevision: lastModifiedByRevision}, ScanOptions{})
 	if err != nil {
@@ -160,7 +160,7 @@ func testGetPodRevision_SkipNoWorkloadOwner(t *testing.T) {
 		Build()
 
 	webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
-	scanner := NewPodScanner(fakeClient, webhook)
+	scanner := newPodScanner(fakeClient, webhook)
 	lastModifiedByRevision := map[string]time.Time{}
 	workloads, err := scanner.ScanOutdatedPods(context.Background(), IstioConfig{LastModifiedByRevision: lastModifiedByRevision}, ScanOptions{})
 	if err != nil {
@@ -218,7 +218,7 @@ func testGetPodRevision_SkipUpToDateImage(t *testing.T) {
 		Build()
 
 	webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
-	scanner := NewPodScanner(fakeClient, webhook)
+	scanner := newPodScanner(fakeClient, webhook)
 	lastModifiedByRevision := map[string]time.Time{}
 	workloads, err := scanner.ScanOutdatedPods(context.Background(), IstioConfig{LastModifiedByRevision: lastModifiedByRevision}, ScanOptions{})
 	if err != nil {
@@ -279,7 +279,7 @@ func testGetPodRevision_SkipPodCreatedAfterConfigMap(t *testing.T) {
 		Build()
 
 	webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
-	scanner := NewPodScanner(fakeClient, webhook)
+	scanner := newPodScanner(fakeClient, webhook)
 	lastModifiedByRevision := map[string]time.Time{"default": configMapTime}
 	workloads, err := scanner.ScanOutdatedPods(context.Background(), IstioConfig{LastModifiedByRevision: lastModifiedByRevision}, ScanOptions{})
 	if err != nil {
@@ -340,7 +340,7 @@ func testGetPodRevision_ScanPodInIstiodConfigReadDelayWindow(t *testing.T) {
 		Build()
 
 	webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
-	scanner := NewPodScanner(fakeClient, webhook)
+	scanner := newPodScanner(fakeClient, webhook)
 	lastModifiedByRevision := map[string]time.Time{"default": configMapTime}
 	workloads, err := scanner.ScanOutdatedPods(context.Background(), IstioConfig{LastModifiedByRevision: lastModifiedByRevision}, ScanOptions{
 		IstiodConfigReadDelay: 10 * time.Second,
@@ -409,7 +409,7 @@ func testGetPodRevision_DoNotSkipWhenTagMWCModifiedAfterPod(t *testing.T) {
 		Build()
 
 	webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
-	scanner := NewPodScanner(fakeClient, webhook)
+	scanner := newPodScanner(fakeClient, webhook)
 	lastModifiedByRevision := map[string]time.Time{"1-29-0": configMapTime}
 	tagToRevision := map[string]string{"stable": "1-29-0"}
 	lastModifiedByTag := map[string]time.Time{"stable": tagMWCTime}
@@ -466,7 +466,7 @@ func testGetPodRevision_FlagWorkloadWhenPodNoSidecarWebhookWouldInject(t *testin
 		Build()
 
 	webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
-	scanner := NewPodScanner(fakeClient, webhook)
+	scanner := newPodScanner(fakeClient, webhook)
 	lastModifiedByRevision := map[string]time.Time{}
 	workloads, err := scanner.ScanOutdatedPods(context.Background(), IstioConfig{LastModifiedByRevision: lastModifiedByRevision}, ScanOptions{})
 	if err != nil {
@@ -581,7 +581,7 @@ func TestScanOutdatedPods_skipNamespaces(t *testing.T) {
 			Build()
 
 		webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
-		scanner := NewPodScanner(fakeClient, webhook)
+		scanner := newPodScanner(fakeClient, webhook)
 		lastModifiedByRevision := map[string]time.Time{}
 		workloads, err := scanner.ScanOutdatedPods(context.Background(), IstioConfig{LastModifiedByRevision: lastModifiedByRevision}, ScanOptions{
 			SkipNamespaces: []string{"kube-system"},
@@ -679,7 +679,7 @@ func TestScanOutdatedPods_limitToNamespaces(t *testing.T) {
 			Build()
 
 		webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
-		scanner := NewPodScanner(fakeClient, webhook)
+		scanner := newPodScanner(fakeClient, webhook)
 		workloads, err := scanner.ScanOutdatedPods(context.Background(), IstioConfig{}, ScanOptions{
 			LimitToNamespaces: []string{"ns1", "ns2"},
 		})
@@ -739,7 +739,7 @@ func TestScanOutdatedPods_StatefulSetWorkload(t *testing.T) {
 		Build()
 
 	webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
-	scanner := NewPodScanner(fakeClient, webhook)
+	scanner := newPodScanner(fakeClient, webhook)
 	workloads, err := scanner.ScanOutdatedPods(context.Background(), IstioConfig{}, ScanOptions{})
 	if err != nil {
 		t.Fatalf("ScanOutdatedPods: %v", err)
@@ -792,7 +792,7 @@ func TestScanOutdatedPods_DaemonSetWorkload(t *testing.T) {
 		Build()
 
 	webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
-	scanner := NewPodScanner(fakeClient, webhook)
+	scanner := newPodScanner(fakeClient, webhook)
 	workloads, err := scanner.ScanOutdatedPods(context.Background(), IstioConfig{}, ScanOptions{})
 	if err != nil {
 		t.Fatalf("ScanOutdatedPods: %v", err)
@@ -882,7 +882,7 @@ func TestScanOutdatedPods_tagResolution(t *testing.T) {
 			).
 			Build()
 
-		scanner := NewPodScanner(fakeClient, webhook)
+		scanner := newPodScanner(fakeClient, webhook)
 		tagToRevision := map[string]string{"canary": "1-20"}
 		workloads, err := scanner.ScanOutdatedPods(context.Background(), IstioConfig{TagToRevision: tagToRevision}, ScanOptions{})
 		if err != nil {
@@ -947,7 +947,7 @@ func TestScanOutdatedPods_tagResolution(t *testing.T) {
 			).
 			Build()
 
-		scanner := NewPodScanner(fakeClient, webhook)
+		scanner := newPodScanner(fakeClient, webhook)
 		tagToRevision := map[string]string{"canary": "1-20"}
 		workloads, err := scanner.ScanOutdatedPods(context.Background(), IstioConfig{TagToRevision: tagToRevision}, ScanOptions{})
 		if err != nil {
@@ -1014,7 +1014,7 @@ func TestScanOutdatedPods_istioInjectionLabel(t *testing.T) {
 			).
 			Build()
 
-		scanner := NewPodScanner(fakeClient, webhook)
+		scanner := newPodScanner(fakeClient, webhook)
 		workloads, err := scanner.ScanOutdatedPods(context.Background(), IstioConfig{}, ScanOptions{})
 		if err != nil {
 			t.Fatalf("ScanOutdatedPods: %v", err)
@@ -1073,7 +1073,7 @@ func TestScanOutdatedPods_istioInjectionLabel(t *testing.T) {
 			Build()
 
 		webhook := &fakeWebhookCaller{expectedProxyImage: "docker.io/istio/proxyv2:1.20.1"}
-		scanner := NewPodScanner(fakeClient, webhook)
+		scanner := newPodScanner(fakeClient, webhook)
 		workloads, err := scanner.ScanOutdatedPods(context.Background(), IstioConfig{}, ScanOptions{})
 		if err != nil {
 			t.Fatalf("ScanOutdatedPods: %v", err)
@@ -1134,7 +1134,7 @@ func TestScanOutdatedPods_istioInjectionLabel(t *testing.T) {
 			).
 			Build()
 
-		scanner := NewPodScanner(fakeClient, webhook)
+		scanner := newPodScanner(fakeClient, webhook)
 		tagToRevision := map[string]string{"canary": "1-20"}
 		workloads, err := scanner.ScanOutdatedPods(context.Background(), IstioConfig{TagToRevision: tagToRevision}, ScanOptions{})
 		if err != nil {
