@@ -11,10 +11,9 @@ Fortsa runs as a controller-runtime manager. The entry point is responsible for:
 - Parsing flags that control safety and behavior (dry-run, compare-hub, delays, cooldowns, skip namespaces).
 - Configuring logging and TLS options (notably: HTTP/2 is disabled by default).
 - Creating the controller-runtime Manager (metrics, probes, leader election).
-- Constructing the Webhook client and the main reconciler.
-- Defining which objects are watched and how events enqueue reconcile requests.
+- Constructing the main reconciler and registering the controller via `controller.SetupIstioChangeController`.
 
-At startup it wires a controller with watches for:
+The controller package defines the watches and wires them to the reconciler. Watches are registered for:
 
 - ConfigMaps: `istio-sidecar-injector*` in `istio-system`.
 - Istio's tag-mapping `MutatingWebhookConfiguration` objects (`istio-revision-tag-*`).
@@ -25,7 +24,7 @@ There is no primary `For` resource; all four are independent watches.
 
 ### 2) Watches and reconcile requests (`internal/configmap`, `internal/mwc`, `internal/namespace`, `internal/periodic`)
 
-Fortsa watches four kinds of inputs:
+The controller package's `SetupIstioChangeController` registers watches using predicates and reconcile request builders from these packages. Fortsa watches four kinds of inputs:
 
 - ConfigMaps: `istio-sidecar-injector*` in `istio-system`.
 - MutatingWebhookConfigurations: `istio-revision-tag-*` (tag-to-revision mapping changes).
@@ -81,7 +80,7 @@ This lets Fortsa interpret workloads that select a tag rather than a concrete re
 
 ### 7) Pod scanning: detect workloads with outdated sidecars (`internal/podscanner`)
 
-The pod scanner is the read-heavy engine. Its job is:
+The pod scanner is the read-heavy engine. It constructs the Istio webhook client internally. Its job is:
 
 “Which restartable workloads currently have at least one pod whose Istio sidecar image does not match the image that would be injected right now?”
 
@@ -117,7 +116,7 @@ Fortsa traverses ReplicaSets and ControllerRevisions as intermediate owner-chain
 
 ### 9) Computing the expected injected pod: Istio webhook client (`internal/webhook`)
 
-Fortsa does not re-implement Istio sidecar injection. Instead, it asks Istio:
+Fortsa does not re-implement Istio sidecar injection. Instead, the pod scanner (which constructs the webhook client internally) asks Istio:
 
 - Take the synthetic Pod built from the workload template.
 - Send it to the injection webhook as an AdmissionReview Create request.
