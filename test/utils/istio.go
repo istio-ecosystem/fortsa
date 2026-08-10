@@ -56,7 +56,15 @@ func VersionToRevision(version string) string {
 
 // extractTarEntry extracts a single tar entry to tmpDir, skipping path-traversal entries.
 func extractTarEntry(tarReader *tar.Reader, header *tar.Header, tmpDir, absTmpDir string) error {
-	target := filepath.Join(tmpDir, header.Name)
+	entryName := filepath.Clean(header.Name)
+	if entryName == "." || entryName == "" || filepath.IsAbs(entryName) {
+		return nil
+	}
+	if entryName == ".." || strings.HasPrefix(entryName, ".."+string(os.PathSeparator)) {
+		return nil
+	}
+
+	target := filepath.Join(tmpDir, entryName)
 	var err error
 	target, err = filepath.Abs(target)
 	if err != nil {
