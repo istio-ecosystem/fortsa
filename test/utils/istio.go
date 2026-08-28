@@ -70,6 +70,12 @@ func extractTarEntry(tarReader *tar.Reader, header *tar.Header, tmpDir, absTmpDi
 	if err != nil {
 		return fmt.Errorf("failed to resolve path for %s: %w", header.Name, err)
 	}
+
+	safeBase := absTmpDir + string(os.PathSeparator)
+	if target != absTmpDir && !strings.HasPrefix(target, safeBase) {
+		return nil
+	}
+
 	rel, err := filepath.Rel(absTmpDir, target)
 	if err != nil {
 		return fmt.Errorf("failed to compute relative path for %s: %w", target, err)
