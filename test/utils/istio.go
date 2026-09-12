@@ -60,27 +60,18 @@ func extractTarEntry(tarReader *tar.Reader, header *tar.Header, tmpDir, absTmpDi
 	if entryName == "." || entryName == "" || filepath.IsAbs(entryName) {
 		return nil
 	}
-	if entryName == ".." || strings.HasPrefix(entryName, ".."+string(os.PathSeparator)) {
-		return nil
-	}
 
-	target := filepath.Join(tmpDir, entryName)
-	var err error
-	target, err = filepath.Abs(target)
+	target := filepath.Join(absTmpDir, entryName)
+	target, err := filepath.Abs(target)
 	if err != nil {
 		return fmt.Errorf("failed to resolve path for %s: %w", header.Name, err)
-	}
-
-	safeBase := absTmpDir + string(os.PathSeparator)
-	if target != absTmpDir && !strings.HasPrefix(target, safeBase) {
-		return nil
 	}
 
 	rel, err := filepath.Rel(absTmpDir, target)
 	if err != nil {
 		return fmt.Errorf("failed to compute relative path for %s: %w", target, err)
 	}
-	if strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || rel == ".." {
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		return nil
 	}
 
