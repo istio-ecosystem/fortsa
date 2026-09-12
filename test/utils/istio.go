@@ -54,33 +54,24 @@ func VersionToRevision(version string) string {
 	return strings.ReplaceAll(version, ".", "-")
 }
 
-// extractTarEntry extracts a single tar entry to tmpDir, skipping path-traversal entries.
-func extractTarEntry(tarReader *tar.Reader, header *tar.Header, tmpDir, absTmpDir string) error {
+// extractTarEntry extracts a single tar entry under absTmpDir, skipping path-traversal entries.
+func extractTarEntry(tarReader *tar.Reader, header *tar.Header, absTmpDir string) error {
 	entryName := filepath.Clean(header.Name)
 	if entryName == "." || entryName == "" || filepath.IsAbs(entryName) {
 		return nil
 	}
-	if entryName == ".." || strings.HasPrefix(entryName, ".."+string(os.PathSeparator)) {
-		return nil
-	}
 
-	target := filepath.Join(tmpDir, entryName)
-	var err error
-	target, err = filepath.Abs(target)
+	target := filepath.Join(absTmpDir, entryName)
+	target, err := filepath.Abs(target)
 	if err != nil {
 		return fmt.Errorf("failed to resolve path for %s: %w", header.Name, err)
-	}
-
-	safeBase := absTmpDir + string(os.PathSeparator)
-	if target != absTmpDir && !strings.HasPrefix(target, safeBase) {
-		return nil
 	}
 
 	rel, err := filepath.Rel(absTmpDir, target)
 	if err != nil {
 		return fmt.Errorf("failed to compute relative path for %s: %w", target, err)
 	}
-	if strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || rel == ".." {
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		return nil
 	}
 
@@ -143,7 +134,7 @@ func DownloadIstio(version, tmpDir string) (istioDir string, err error) {
 		if err != nil {
 			return "", fmt.Errorf("failed to read tar: %w", err)
 		}
-		if err := extractTarEntry(tarReader, header, tmpDir, absTmpDir); err != nil {
+		if err := extractTarEntry(tarReader, header, absTmpDir); err != nil {
 			return "", err
 		}
 	}
