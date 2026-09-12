@@ -54,48 +54,61 @@ func VersionToRevision(version string) string {
 	return strings.ReplaceAll(version, ".", "-")
 }
 
-// extractTarEntry extracts a single tar entry under absTmpDir, skipping path-traversal entries.
-func extractTarEntry(tarReader *tar.Reader, header *tar.Header, absTmpDir string) error {
-	entryName := filepath.Clean(header.Name)
-	if entryName == "." || entryName == "" || filepath.IsAbs(entryName) {
-		return nil
+// safeTarEntryRelPath returns a relative path under the extraction root for a tar entry name.
+// An empty return with nil error means the entry should be skipped.
+func safeTarEntryRelPath(entryName string) (string, error) {
+	if entryName == "" || entryName == "." {
+		return "", nil
+	}
+	if strings.Contains(entryName, "..") {
+		return "", fmt.Errorf("path traversal in tar entry: %q", entryName)
+	}
+	if filepath.IsAbs(entryName) {
+		return "", fmt.Errorf("absolute path in tar entry: %q", entryName)
+	}
+	if !filepath.IsLocal(entryName) {
+		return "", fmt.Errorf("non-local path in tar entry: %q", entryName)
 	}
 
-	baseDir, err := filepath.Abs(absTmpDir)
+	clean := filepath.Clean(entryName)
+	if clean == "" || clean == "." {
+		return "", nil
+	}
+	if clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("path traversal in tar entry: %q", entryName)
+	}
+	return clean, nil
+}
+
+// extractTarEntry extracts a single tar entry under root, rejecting path-traversal entries.
+func extractTarEntry(tarReader *tar.Reader, header *tar.Header, root *os.Root) error {
+	rel, err := safeTarEntryRelPath(header.Name)
 	if err != nil {
-		return fmt.Errorf("failed to resolve base dir %s: %w", absTmpDir, err)
+		return err
 	}
-
-	target := filepath.Join(baseDir, entryName)
-	target, err = filepath.Abs(target)
-	if err != nil {
-		return fmt.Errorf("failed to resolve path for %s: %w", header.Name, err)
-	}
-
-	baseWithSep := baseDir
-	if !strings.HasSuffix(baseWithSep, string(os.PathSeparator)) {
-		baseWithSep += string(os.PathSeparator)
-	}
-	if target != baseDir && !strings.HasPrefix(target, baseWithSep) {
+	if rel == "" {
 		return nil
 	}
 
 	switch header.Typeflag {
 	case tar.TypeDir:
-		if err := os.MkdirAll(target, 0o755); err != nil {
-			return fmt.Errorf("failed to create dir %s: %w", target, err)
+		if err := root.MkdirAll(rel, 0o755); err != nil {
+			return fmt.Errorf("failed to create dir %s: %w", rel, err)
 		}
 	case tar.TypeReg:
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return fmt.Errorf("failed to create parent dir for %s: %w", target, err)
+		parent := filepath.Dir(rel)
+		if parent != "." {
+			if err := root.MkdirAll(parent, 0o755); err != nil {
+				return fmt.Errorf("failed to create parent dir for %s: %w", rel, err)
+			}
 		}
-		outFile, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR|os.O_TRUNC, os.FileMode(header.Mode))
+		outFile, err := root.OpenFile(rel, os.O_CREATE|os.O_RDWR|os.O_TRUNC, os.FileMode(header.Mode))
 		if err != nil {
-			return fmt.Errorf("failed to create file %s: %w", target, err)
+			return fmt.Errorf("failed to create file %s: %w", rel, err)
 		}
 		if _, err := io.Copy(outFile, tarReader); err != nil {
 			_ = outFile.Close()
-			return fmt.Errorf("failed to write file %s: %w", target, err)
+			return fmt.Errorf("failed to write file %s: %w", rel, err)
 		}
 		_ = outFile.Close()
 	}
@@ -113,6 +126,12 @@ func DownloadIstio(version, tmpDir string) (istioDir string, err error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve tmpDir %s: %w", tmpDir, err)
 	}
+
+	root, err := os.OpenRoot(absTmpDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to open extraction root %s: %w", absTmpDir, err)
+	}
+	defer func() { _ = root.Close() }()
 
 	resp, err := http.Get(url)
 	if err != nil {
@@ -139,7 +158,7 @@ func DownloadIstio(version, tmpDir string) (istioDir string, err error) {
 		if err != nil {
 			return "", fmt.Errorf("failed to read tar: %w", err)
 		}
-		if err := extractTarEntry(tarReader, header, absTmpDir); err != nil {
+		if err := extractTarEntry(tarReader, header, root); err != nil {
 			return "", err
 		}
 	}
