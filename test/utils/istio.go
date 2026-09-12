@@ -61,17 +61,22 @@ func extractTarEntry(tarReader *tar.Reader, header *tar.Header, absTmpDir string
 		return nil
 	}
 
-	target := filepath.Join(absTmpDir, entryName)
-	target, err := filepath.Abs(target)
+	baseDir, err := filepath.Abs(absTmpDir)
+	if err != nil {
+		return fmt.Errorf("failed to resolve base dir %s: %w", absTmpDir, err)
+	}
+
+	target := filepath.Join(baseDir, entryName)
+	target, err = filepath.Abs(target)
 	if err != nil {
 		return fmt.Errorf("failed to resolve path for %s: %w", header.Name, err)
 	}
 
-	rel, err := filepath.Rel(absTmpDir, target)
-	if err != nil {
-		return fmt.Errorf("failed to compute relative path for %s: %w", target, err)
+	baseWithSep := baseDir
+	if !strings.HasSuffix(baseWithSep, string(os.PathSeparator)) {
+		baseWithSep += string(os.PathSeparator)
 	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+	if target != baseDir && !strings.HasPrefix(target, baseWithSep) {
 		return nil
 	}
 
