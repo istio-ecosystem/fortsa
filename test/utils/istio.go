@@ -54,8 +54,8 @@ func VersionToRevision(version string) string {
 	return strings.ReplaceAll(version, ".", "-")
 }
 
-// extractTarEntry extracts a single tar entry to tmpDir, skipping path-traversal entries.
-func extractTarEntry(tarReader *tar.Reader, header *tar.Header, tmpDir, absTmpDir string) error {
+// extractTarEntry extracts a single tar entry under absTmpDir, skipping path-traversal entries.
+func extractTarEntry(tarReader *tar.Reader, header *tar.Header, absTmpDir string) error {
 	entryName := filepath.Clean(header.Name)
 	if entryName == "." || entryName == "" || filepath.IsAbs(entryName) {
 		return nil
@@ -134,7 +134,7 @@ func DownloadIstio(version, tmpDir string) (istioDir string, err error) {
 		if err != nil {
 			return "", fmt.Errorf("failed to read tar: %w", err)
 		}
-		if err := extractTarEntry(tarReader, header, tmpDir, absTmpDir); err != nil {
+		if err := extractTarEntry(tarReader, header, absTmpDir); err != nil {
 			return "", err
 		}
 	}
