@@ -46,7 +46,7 @@ jobs:
 
       - name: Install chart-releaser
         run: |
-          CR_VERSION="v1.8.1"
+          CR_VERSION="v1.10.1"
           ARCH=$(uname -m)
           case "$ARCH" in
             x86_64) CR_ARCH="linux_amd64" ;;
