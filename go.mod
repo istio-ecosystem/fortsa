@@ -2,8 +2,6 @@ module github.com/istio-ecosystem/fortsa
 
 go 1.26.10
 
-toolchain go1.26.10
-
 require (
 	github.com/evanphx/json-patch/v5 v5.9.11
 	github.com/onsi/ginkgo/v2 v2.33.1
