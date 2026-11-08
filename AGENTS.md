@@ -42,7 +42,7 @@ Use the Makefile targets as the canonical workflow:
 
 ## Go version and language features
 
-- **MUST** assume Go version requirements defined by the repo (see README; currently Go `v1.26.0+`).
+- **MUST** assume Go version requirements defined by the repo (see README; currently Go `v1.26.10+`).
 - **MUST** write idiomatic Go:
   - Prefer clarity over cleverness.
   - Keep functions small and single-purpose.
