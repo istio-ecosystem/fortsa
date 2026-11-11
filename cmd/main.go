@@ -113,6 +113,9 @@ func main() {
 		"Skip re-annotating a workload if it was annotated within this duration. Use 0 to disable.")
 	pflag.String("skip-namespaces", "kube-system,istio-system",
 		"Comma-separated list of namespaces to skip when scanning pods for outdated sidecars.")
+	pflag.Bool("enable-argo-rollouts", false,
+		"If true, detect and restart Argo Rollouts Rollout resources with outdated sidecars. "+
+			"Requires the Rollout CRD (argoproj.io/v1alpha1) and RBAC for rollouts.argoproj.io.")
 
 	zapOpts := zap.Options{}
 	zapOpts.BindFlags(flag.CommandLine)
@@ -258,6 +261,7 @@ func main() {
 		IstiodConfigReadDelay: viper.GetDuration("istiod-config-read-delay"),
 		AnnotationCooldown:    viper.GetDuration("annotation-cooldown"),
 		SkipNamespaces:        parseSkipNamespaces(viper.GetString("skip-namespaces")),
+		EnableArgoRollouts:    viper.GetBool("enable-argo-rollouts"),
 		ReconcilePeriod:       viper.GetDuration("reconcile-period"),
 	})
 

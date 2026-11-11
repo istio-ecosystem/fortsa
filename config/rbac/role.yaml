@@ -26,6 +26,10 @@ rules:
   - apiGroups: ["apps"]
     resources: ["replicasets", "controllerrevisions"]
     verbs: ["get", "list", "watch"]
+  # Argo Rollouts (optional, --enable-argo-rollouts)
+  - apiGroups: ["argoproj.io"]
+    resources: ["rollouts"]
+    verbs: ["get", "list", "watch", "patch"]
   # Leases for leader election
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]

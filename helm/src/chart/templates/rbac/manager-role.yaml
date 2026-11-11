@@ -52,6 +52,17 @@ rules:
         - get
         - list
         - watch
+    {{- if (.Values.fortsaOptions.argoRollouts).enabled }}
+    - apiGroups:
+        - argoproj.io
+      resources:
+        - rollouts
+      verbs:
+        - get
+        - list
+        - watch
+        - patch
+    {{- end }}
     - apiGroups:
         - coordination.k8s.io
       resources:
