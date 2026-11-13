@@ -70,6 +70,7 @@ type ReconcilerOptions struct {
 	IstiodConfigReadDelay time.Duration
 	AnnotationCooldown    time.Duration
 	SkipNamespaces        []string
+	EnableArgoRollouts    bool
 	ReconcilePeriod       time.Duration
 }
 
@@ -132,7 +133,7 @@ func NewIstioChangeReconciler(opts ReconcilerOptions) *IstioChangeReconciler {
 	return &IstioChangeReconciler{
 		Client:                opts.Client,
 		Scheme:                opts.Scheme,
-		scanner:               podscanner.NewPodScanner(opts.Client),
+		scanner:               podscanner.NewPodScanner(opts.Client, opts.EnableArgoRollouts),
 		annotator:             annotator.NewWorkloadAnnotator(opts.Client, opts.AnnotationCooldown),
 		dryRun:                opts.DryRun,
 		compareHub:            opts.CompareHub,

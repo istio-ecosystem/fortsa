@@ -27,6 +27,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
@@ -35,6 +36,7 @@ import (
 
 	"github.com/istio-ecosystem/fortsa/internal/constants"
 	"github.com/istio-ecosystem/fortsa/internal/podscanner"
+	"github.com/istio-ecosystem/fortsa/internal/rollout"
 )
 
 func TestWorkloadAnnotator_Annotate(t *testing.T) {
@@ -403,5 +405,116 @@ func TestWorkloadAnnotator_Annotate_conflictRetrySucceeds(t *testing.T) {
 	}
 	if _, ok := updated.Spec.Template.Annotations[constants.RestartedAtAnnotation]; !ok {
 		t.Error("expected fortsa.scaffidi.net/restartedAt annotation after retry")
+	}
+}
+
+func annotatorRolloutScheme(t *testing.T) *runtime.Scheme {
+	t.Helper()
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add core scheme: %v", err)
+	}
+	if err := appsv1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add apps scheme: %v", err)
+	}
+	scheme.AddKnownTypeWithName(rollout.GVK, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(rollout.GVK.GroupVersion().WithKind("RolloutList"), &unstructured.UnstructuredList{})
+	return scheme
+}
+
+func annotatorTestRollout(name string, restartAt string) *unstructured.Unstructured {
+	spec := map[string]interface{}{}
+	if restartAt != "" {
+		spec["restartAt"] = restartAt
+	}
+	ro := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": rollout.GVK.GroupVersion().String(),
+		"kind":       rollout.Kind,
+		"metadata": map[string]interface{}{
+			"name":      name,
+			"namespace": "default",
+		},
+		"spec": spec,
+	}}
+	ro.SetGroupVersionKind(rollout.GVK)
+	return ro
+}
+
+func TestWorkloadAnnotator_Annotate_Rollout(t *testing.T) {
+	ro := annotatorTestRollout("test-rollout", "")
+	c := fake.NewClientBuilder().WithScheme(annotatorRolloutScheme(t)).WithObjects(ro).Build()
+	a := NewWorkloadAnnotator(c, 0)
+	ref := podscanner.WorkloadRef{NamespacedName: types.NamespacedName{Namespace: "default", Name: ro.GetName()}, Kind: rollout.Kind}
+
+	annotated, err := a.Annotate(context.Background(), ref)
+	if err != nil {
+		t.Fatalf("Annotate: %v", err)
+	}
+	if !annotated {
+		t.Fatal("Annotate: want true, got false")
+	}
+
+	var updated unstructured.Unstructured
+	updated.SetGroupVersionKind(rollout.GVK)
+	if err := c.Get(context.Background(), ref.NamespacedName, &updated); err != nil {
+		t.Fatalf("Get Rollout: %v", err)
+	}
+	restartAt, found, err := unstructured.NestedString(updated.Object, "spec", "restartAt")
+	if err != nil || !found {
+		t.Fatalf("restartAt = %q, found %v, err %v", restartAt, found, err)
+	}
+	if _, err := time.Parse(time.RFC3339, restartAt); err != nil {
+		t.Errorf("restartAt %q is not RFC3339: %v", restartAt, err)
+	}
+}
+
+func TestWorkloadAnnotator_Annotate_Rollout_cooldownSkipsReannotation(t *testing.T) {
+	firstRestartAt := time.Now().UTC().Add(-time.Minute).Format(time.RFC3339)
+	ro := annotatorTestRollout("test-rollout", firstRestartAt)
+	c := fake.NewClientBuilder().WithScheme(annotatorRolloutScheme(t)).WithObjects(ro).Build()
+	a := NewWorkloadAnnotator(c, 5*time.Minute)
+	ref := podscanner.WorkloadRef{NamespacedName: types.NamespacedName{Namespace: "default", Name: ro.GetName()}, Kind: rollout.Kind}
+
+	annotated, err := a.Annotate(context.Background(), ref)
+	if err != nil {
+		t.Fatalf("Annotate: %v", err)
+	}
+	if annotated {
+		t.Fatal("Annotate within cooldown: want false, got true")
+	}
+
+	var updated unstructured.Unstructured
+	updated.SetGroupVersionKind(rollout.GVK)
+	if err := c.Get(context.Background(), ref.NamespacedName, &updated); err != nil {
+		t.Fatalf("Get Rollout: %v", err)
+	}
+	got, _, _ := unstructured.NestedString(updated.Object, "spec", "restartAt")
+	if got != firstRestartAt {
+		t.Errorf("restartAt changed from %q to %q", firstRestartAt, got)
+	}
+}
+
+func TestWorkloadAnnotator_Annotate_Rollout_conflictRetrySucceeds(t *testing.T) {
+	ro := annotatorTestRollout("test-rollout", "")
+	baseClient := fake.NewClientBuilder().WithScheme(annotatorRolloutScheme(t)).WithObjects(ro).Build()
+	wrappingClient := &conflictOnFirstPatchClient{Client: baseClient}
+	a := NewWorkloadAnnotator(wrappingClient, 0)
+	ref := podscanner.WorkloadRef{NamespacedName: types.NamespacedName{Namespace: "default", Name: ro.GetName()}, Kind: rollout.Kind}
+
+	annotated, err := a.Annotate(context.Background(), ref)
+	if err != nil {
+		t.Fatalf("Annotate after conflict retry: %v", err)
+	}
+	if !annotated {
+		t.Fatal("Annotate after conflict retry: want true, got false")
+	}
+
+	var updated unstructured.Unstructured
+	updated.SetGroupVersionKind(rollout.GVK)
+	if err := baseClient.Get(context.Background(), ref.NamespacedName, &updated); err != nil {
+		t.Fatalf("Get Rollout: %v", err)
+	}
+	if _, found, _ := unstructured.NestedString(updated.Object, "spec", "restartAt"); !found {
+		t.Error("expected restartAt after conflict retry")
 	}
 }

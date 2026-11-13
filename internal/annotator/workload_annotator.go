@@ -25,11 +25,13 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/istio-ecosystem/fortsa/internal/constants"
 	"github.com/istio-ecosystem/fortsa/internal/podscanner"
+	"github.com/istio-ecosystem/fortsa/internal/rollout"
 )
 
 const (
@@ -54,8 +56,8 @@ func NewWorkloadAnnotator(c client.Client, annotationCooldown time.Duration) *Wo
 	return &WorkloadAnnotatorImpl{client: c, annotationCooldown: annotationCooldown}
 }
 
-// Annotate adds fortsa.scaffidi.net/restartedAt to the workload's pod template
-// spec.template.metadata.annotations, triggering a rolling restart.
+// Annotate adds fortsa.scaffidi.net/restartedAt to a workload's pod template,
+// or sets spec.restartAt for a Rollout, triggering a rolling restart.
 // When annotationCooldown is set, skips re-annotating if the workload was annotated within that duration.
 // Returns (true, nil) when a patch was applied, (false, nil) when skipped or unsupported kind, (false, err) on error.
 func (a *WorkloadAnnotatorImpl) Annotate(ctx context.Context, ref podscanner.WorkloadRef) (bool, error) {
@@ -108,6 +110,19 @@ func (a *WorkloadAnnotatorImpl) Annotate(ctx context.Context, ref podscanner.Wor
 			}, client.RawPatch(types.MergePatchType, patchBytes))
 		})
 		return err == nil, err
+	case "Rollout":
+		restartAtPatch, err := rollout.BuildRestartAtPatch(time.Now().UTC())
+		if err != nil {
+			return false, fmt.Errorf("build Rollout restartAt patch: %w", err)
+		}
+		ro := &unstructured.Unstructured{}
+		ro.SetGroupVersionKind(rollout.GVK)
+		ro.SetNamespace(ref.Namespace)
+		ro.SetName(ref.Name)
+		err = a.patchWithRetry(ctx, func() error {
+			return a.client.Patch(ctx, ro, client.RawPatch(types.MergePatchType, restartAtPatch))
+		})
+		return err == nil, err
 	default:
 		return false, nil
 	}
@@ -158,6 +173,15 @@ func (a *WorkloadAnnotatorImpl) getRestartedAt(ctx context.Context, ref podscann
 			return time.Time{}, fmt.Errorf("get workload %s for restartedAt: %w", ref.NamespacedName, err)
 		}
 		annotations = ds.Spec.Template.Annotations
+	case "Rollout":
+		ro, err := rollout.Get(ctx, a.client, ref.NamespacedName)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("get Rollout %s for restartAt: %w", ref.NamespacedName, err)
+		}
+		if ro == nil {
+			return time.Time{}, nil
+		}
+		return rollout.GetRestartAt(ro)
 	default:
 		return time.Time{}, nil
 	}

@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/istio-ecosystem/fortsa/internal/constants"
+	"github.com/istio-ecosystem/fortsa/internal/rollout"
 	"github.com/istio-ecosystem/fortsa/internal/webhook"
 )
 
@@ -38,6 +39,7 @@ const (
 	istioProxyContainerName = "istio-proxy"
 	dnsSubdomainMaxLen      = 63
 	podNameSuffix           = "-fortsa-check"
+	rolloutWorkloadKind     = "Rollout"
 )
 
 // ParsedImage holds the components of a container image reference.
@@ -89,25 +91,26 @@ func imagesMatch(current, expected string, compareHub bool) bool {
 
 // PodScanner lists Pods with Istio sidecars and finds their parent workloads.
 type PodScanner struct {
-	client        client.Client
-	webhookCaller webhook.WebhookCaller
+	client             client.Client
+	webhookCaller      webhook.WebhookCaller
+	enableArgoRollouts bool
 }
 
 // newPodScanner creates a PodScanner with the given client and webhook caller.
 // Used by tests to inject fake webhook callers; production code uses NewPodScanner.
-func newPodScanner(c client.Client, webhookCaller webhook.WebhookCaller) *PodScanner {
-	return &PodScanner{client: c, webhookCaller: webhookCaller}
+func newPodScanner(c client.Client, webhookCaller webhook.WebhookCaller, enableArgoRollouts bool) *PodScanner {
+	return &PodScanner{client: c, webhookCaller: webhookCaller, enableArgoRollouts: enableArgoRollouts}
 }
 
 // NewPodScanner creates a new PodScanner that uses the Istio injection webhook.
-func NewPodScanner(c client.Client) *PodScanner {
-	return newPodScanner(c, webhook.NewWebhookClient(c))
+func NewPodScanner(c client.Client, enableArgoRollouts bool) *PodScanner {
+	return newPodScanner(c, webhook.NewWebhookClient(c), enableArgoRollouts)
 }
 
-// WorkloadRef identifies a Deployment, StatefulSet, or DaemonSet.
+// WorkloadRef identifies a Deployment, StatefulSet, DaemonSet, or Rollout.
 type WorkloadRef struct {
 	types.NamespacedName
-	Kind string // "Deployment", "StatefulSet", or "DaemonSet"
+	Kind string // "Deployment", "StatefulSet", "DaemonSet", or "Rollout"
 }
 
 // ScanOptions configures pod scanning behavior.
@@ -261,6 +264,18 @@ func (s *PodScanner) resolveOwner(ctx context.Context, obj metav1.Object, owner 
 		return s.getWorkloadRef(ctx, nn, "StatefulSet", &appsv1.StatefulSet{})
 	case "DaemonSet":
 		return s.getWorkloadRef(ctx, nn, "DaemonSet", &appsv1.DaemonSet{})
+	case rolloutWorkloadKind:
+		if !s.enableArgoRollouts {
+			return nil, nil
+		}
+		ro, err := rollout.Get(ctx, s.client, nn)
+		if err != nil {
+			return nil, err
+		}
+		if ro == nil {
+			return nil, nil
+		}
+		return &WorkloadRef{NamespacedName: nn, Kind: rolloutWorkloadKind}, nil
 	case "ReplicaSet", "ControllerRevision":
 		return s.fetchIntermediateOwner(ctx, nn, owner.Kind)
 	}
@@ -269,7 +284,7 @@ func (s *PodScanner) resolveOwner(ctx context.Context, obj metav1.Object, owner 
 }
 
 // findWorkloadOwner recursively follows ownerReferences to find a Deployment,
-// StatefulSet, or DaemonSet. Returns nil if none found.
+// StatefulSet, DaemonSet, or Rollout. Returns nil if none found.
 func (s *PodScanner) findWorkloadOwner(ctx context.Context, obj metav1.Object) (*WorkloadRef, error) {
 	owners := obj.GetOwnerReferences()
 	if len(owners) == 0 {
@@ -299,37 +314,17 @@ func (s *PodScanner) findWorkloadOwner(ctx context.Context, obj metav1.Object) (
 // when namespace has istio-injection=enabled. Returns "" when neither workload nor namespace
 // has istio.io/rev and namespace lacks istio-injection=enabled (caller should skip the pod).
 func (s *PodScanner) getIstioRevFromWorkloadOrNamespace(ctx context.Context, ref *WorkloadRef) (string, error) {
-	switch ref.Kind {
-	case "Deployment": //nolint:goconst
-		var dep appsv1.Deployment
-		if err := s.client.Get(ctx, ref.NamespacedName, &dep); err != nil {
-			return "", err
-		}
-		if v, ok := dep.Spec.Template.Labels[constants.LabelIstioRev]; ok && v != "" {
-			return v, nil
-		}
-		// Template has no istio.io/rev; continue to namespace check below
-	case "StatefulSet": //nolint:goconst
-		var sts appsv1.StatefulSet
-		if err := s.client.Get(ctx, ref.NamespacedName, &sts); err != nil {
-			return "", err
-		}
-		if v, ok := sts.Spec.Template.Labels[constants.LabelIstioRev]; ok && v != "" {
-			return v, nil
-		}
-		// Template has no istio.io/rev; continue to namespace check below
-	case "DaemonSet": //nolint:goconst
-		var ds appsv1.DaemonSet
-		if err := s.client.Get(ctx, ref.NamespacedName, &ds); err != nil {
-			return "", err
-		}
-		if v, ok := ds.Spec.Template.Labels[constants.LabelIstioRev]; ok && v != "" {
-			return v, nil
-		}
-		// Template has no istio.io/rev; continue to namespace check below
-	default:
-		//nolint:goconst
+	template, supported, err := s.getTemplateForRevision(ctx, ref)
+	if err != nil {
+		return "", err
+	}
+	if !supported {
 		return "default", nil
+	}
+	if template != nil {
+		if v, ok := template.Labels[constants.LabelIstioRev]; ok && v != "" {
+			return v, nil
+		}
 	}
 
 	var ns corev1.Namespace
@@ -344,6 +339,44 @@ func (s *PodScanner) getIstioRevFromWorkloadOrNamespace(ctx context.Context, ref
 		return "default", nil
 	}
 	return "", nil
+}
+
+func (s *PodScanner) getTemplateForRevision(ctx context.Context, ref *WorkloadRef) (*corev1.PodTemplateSpec, bool, error) {
+	switch ref.Kind {
+	case "Deployment": //nolint:goconst
+		var dep appsv1.Deployment
+		if err := s.client.Get(ctx, ref.NamespacedName, &dep); err != nil {
+			return nil, true, err
+		}
+		return &dep.Spec.Template, true, nil
+	case "StatefulSet": //nolint:goconst
+		var sts appsv1.StatefulSet
+		if err := s.client.Get(ctx, ref.NamespacedName, &sts); err != nil {
+			return nil, true, err
+		}
+		return &sts.Spec.Template, true, nil
+	case "DaemonSet": //nolint:goconst
+		var ds appsv1.DaemonSet
+		if err := s.client.Get(ctx, ref.NamespacedName, &ds); err != nil {
+			return nil, true, err
+		}
+		return &ds.Spec.Template, true, nil
+	case rolloutWorkloadKind:
+		ro, err := rollout.Get(ctx, s.client, ref.NamespacedName)
+		if err != nil {
+			return nil, true, err
+		}
+		if ro == nil {
+			return nil, true, nil
+		}
+		template, err := rollout.ExtractPodTemplateSpec(ctx, s.client, ro)
+		if err != nil {
+			return nil, true, fmt.Errorf("get Rollout pod template: %w", err)
+		}
+		return template, true, nil
+	default:
+		return nil, false, nil
+	}
 }
 
 // buildPodFromWorkload fetches the workload and builds a Pod from its template.
@@ -401,6 +434,27 @@ func (s *PodScanner) buildPodFromWorkload(ctx context.Context, ref *WorkloadRef)
 				Annotations: ds.Spec.Template.Annotations,
 			},
 			Spec: ds.Spec.Template.Spec,
+		}, nil
+	case rolloutWorkloadKind:
+		ro, err := rollout.Get(ctx, s.client, nn)
+		if err != nil {
+			return nil, err
+		}
+		if ro == nil {
+			return nil, nil
+		}
+		template, err := rollout.ExtractPodTemplateSpec(ctx, s.client, ro)
+		if err != nil {
+			return nil, fmt.Errorf("get Rollout pod template: %w", err)
+		}
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace:   nn.Namespace,
+				Name:        name,
+				Labels:      template.Labels,
+				Annotations: template.Annotations,
+			},
+			Spec: template.Spec,
 		}, nil
 	default:
 		return nil, nil
@@ -478,8 +532,9 @@ func (s *PodScanner) processPodForOutdatedSidecar(ctx context.Context, pod *core
 	return ref
 }
 
-// ScanOutdatedPods lists all Pods, finds each pod's controller (Deployment/StatefulSet/DaemonSet),
-// builds a pod from the workload template, submits it to the Istio injection webhook, and compares
+// ScanOutdatedPods lists all Pods, finds each pod's controller
+// (Deployment/StatefulSet/DaemonSet/Rollout), builds a pod from the workload template, submits it to
+// the Istio injection webhook, and compares
 // the mutated response's istio-proxy image with the current pod. Returns WorkloadRefs for pods
 // with outdated sidecars. cfg.LastModifiedByRevision is used for the ConfigMap LastModified skip.
 // cfg.LastModifiedByTag is used for the tag MWC LastModified skip when workload uses a tag.

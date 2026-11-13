@@ -15,6 +15,8 @@ This document describes how Fortsa works internally: its components, data flows,
 
 **Key mechanism**: Fortsa adds the `fortsa.scaffidi.net/restartedAt` annotation to Deployments, StatefulSets, and DaemonSets. This triggers a rolling restart of their pods—the same mechanism used by `kubectl rollout restart`. When a pod is recreated, Istio's MutatingWebhook injects the updated sidecar proxy.
 
+Optionally (`--enable-argo-rollouts`, default off), Fortsa also detects and restarts pods owned by Argo Rollouts `Rollout` resources, using Argo's own `spec.restartAt` field instead of the annotation. See [Argo Rollouts Support](#argo-rollouts-support-optional) below.
+
 ## Package Structure
 
 ```text
@@ -29,6 +31,7 @@ fortsa/
 │   ├── podscanner/           # Pod scanning, outdated sidecar detection
 │   ├── annotator/           # Workload annotation for restarts
 │   ├── configmap/           # ConfigMap predicate, reconcile request, parser, fetch (BuildLastModifiedByRevision)
+│   ├── rollout/              # Argo Rollouts Rollout helpers (unstructured; optional, no CRD import)
 │   └── webhook/             # Istio injection webhook client
 ├── config/                  # Kustomize manifests (RBAC, manager, Prometheus)
 ├── helm/src/chart/          # Helm chart for deployment
@@ -40,12 +43,13 @@ fortsa/
 ```text
 main       → controller
 controller → annotator, configmap, mwc, namespace, periodic, podscanner
-annotator  → (k8s client)
+annotator  → rollout, (k8s client)
 configmap  → (k8s client)
 mwc        → (k8s client)
 namespace  → (controller-runtime)
 periodic   → (controller-runtime)
-podscanner → webhook
+podscanner → rollout, webhook
+rollout    → (k8s client, unstructured)
 webhook    → (k8s client)
 ```
 
@@ -169,7 +173,7 @@ flowchart TD
 **Steps**:
 
 1. **List pods** — Optionally limited by namespace (e.g., for namespace-scoped reconciliation)
-2. **findWorkloadOwner** — Follow ownerReferences: Pod → ReplicaSet/ControllerRevision → Deployment/StatefulSet/DaemonSet
+2. **findWorkloadOwner** — Follow ownerReferences: Pod → ReplicaSet/ControllerRevision → Deployment/StatefulSet/DaemonSet. When `--enable-argo-rollouts` is set, a ReplicaSet owned directly by a `Rollout` (argoproj.io/v1alpha1) resolves to that Rollout instead (Rollouts own their ReplicaSets directly, not via Deployment)
 3. **getIstioRevFromWorkloadOrNamespace** — Get `istio.io/rev` from workload pod template, or from namespace (`istio.io/rev` or `istio-injection=enabled`); returns `"default"` when namespace has `istio-injection=enabled`
 4. **Resolve tag → revision** — Use `tagToRevision` map from `istio-revision-tag-*` MWCs
 5. **shouldSkipPodForConfigMap** — Skip if pod was created at or after max(ConfigMap lastModified, MWC lastModified) + IstiodConfigReadDelay
@@ -200,7 +204,37 @@ The `configmap` package parses Istio sidecar injector ConfigMaps and builds last
 
 - **Annotation**: Patches `spec.template.metadata.annotations` with `fortsa.scaffidi.net/restartedAt` (RFC3339 timestamp) via JSON merge patch
 - **Cooldown**: When `annotationCooldown` is set, skips re-annotating if the workload was annotated within that duration
-- **Supported kinds**: Deployment, StatefulSet, DaemonSet
+- **Supported kinds**: Deployment, StatefulSet, DaemonSet, and (optionally) Rollout — see [Argo Rollouts Support](#argo-rollouts-support-optional)
+
+## Argo Rollouts Support (optional)
+
+Argo Rollouts' `Rollout` resource creates and owns its own ReplicaSets directly — it is not
+a Deployment/StatefulSet/DaemonSet, so Fortsa ignores it by default. Passing
+`--enable-argo-rollouts` (Helm: `fortsaOptions.argoRollouts.enabled: true`) turns on detection
+and restart for Rollout-owned pods. This requires the Rollout CRD (`argoproj.io/v1alpha1`) to be
+installed in the cluster and grants additional RBAC (`get`/`list`/`watch`/`patch` on
+`rollouts.argoproj.io`) — see [config/rbac/role.yaml](config/rbac/role.yaml) and the Helm chart's
+`manager-role.yaml`, both gated behind the same flag/value.
+
+[internal/rollout/rollout.go](internal/rollout/rollout.go) implements this using
+`unstructured.Unstructured` via the existing controller-runtime client — **no new Go dependency**
+on `argoproj.io/argo-rollouts` is introduced, keeping Fortsa's "minimal dependencies" principle
+intact.
+
+- **Pod template resolution**: A `Rollout` can define its pods inline (`spec.template`) or via
+  `spec.workloadRef` pointing at a Deployment (iFood's `ifood-app` chart uses the latter). When
+  `workloadRef` is used, Argo Rollouts' own controller resolves `spec.template` only in-memory and
+  never persists it back to the stored Rollout object — so Fortsa reads the referenced Deployment's
+  `spec.template` directly instead of trusting a (necessarily empty) `Rollout.spec.template`.
+  `ExtractPodTemplateSpec` implements this: inline template if present and non-empty, otherwise
+  fetch the `workloadRef` Deployment (only `kind: Deployment`, `apiVersion: apps/v1` supported).
+- **Restart mechanism**: Instead of the `restartedAt` pod-template annotation, Fortsa patches the
+  Rollout's own `spec.restartAt` field (RFC3339 timestamp) — the same mechanism used by
+  `kubectl argo rollouts restart`. The existing `--annotation-cooldown` logic reads this field back
+  for Rollouts the same way it reads the `restartedAt` annotation for the other kinds.
+- **Missing CRD is not an error**: If the Rollout CRD isn't installed (or the specific Rollout is
+  gone), `rollout.Get` returns `(nil, nil)` rather than an error, so Fortsa fails safely — it skips
+  that pod instead of crashing the reconcile loop.
 
 ## Kubernetes Resources
 
@@ -212,6 +246,7 @@ The `configmap` package parses Istio sidecar injector ConfigMaps and builds last
 | Pod | Sidecar image comparison |
 | Deployment / StatefulSet / DaemonSet | Patched with restartedAt annotation |
 | ReplicaSet / ControllerRevision | Owner chain traversal |
+| Rollout (argoproj.io/v1alpha1, optional) | Patched with `spec.restartAt`; requires `--enable-argo-rollouts` |
 
 ## Configuration Flags
 
@@ -224,6 +259,7 @@ The `configmap` package parses Istio sidecar injector ConfigMaps and builds last
 | `--reconcile-period` | 0 | Period between full reconciliations; 0 disables periodic reconcile |
 | `--annotation-cooldown` | 5m | Skip re-annotating if workload was annotated within this duration |
 | `--skip-namespaces` | kube-system,istio-system | Comma-separated namespaces to skip when scanning pods |
+| `--enable-argo-rollouts` | false | Detect and restart Argo Rollouts `Rollout` resources (requires the Rollout CRD and RBAC for `rollouts.argoproj.io`) |
 
 ## lastModifiedByRevision and Pod Skip Logic
 

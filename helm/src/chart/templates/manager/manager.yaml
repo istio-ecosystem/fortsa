@@ -51,6 +51,7 @@ spec:
                     - --istiod-config-read-delay={{ (.Values.fortsaOptions).istiodConfigReadDelay | default "10s" }}
                     - --annotation-cooldown={{ (.Values.fortsaOptions).annotationCooldown | default "5m" }}
                     - --skip-namespaces={{ (.Values.fortsaOptions).skipNamespaces | default "kube-system,istio-system" }}
+                    - --enable-argo-rollouts={{ (.Values.fortsaOptions.argoRollouts).enabled | default false }}
                     {{- range .Values.manager.args }}
                     - {{ . }}
                     {{- end }}

@@ -103,6 +103,14 @@ updating this annotation is what causes the controller to initiate a controlled 
 pods. This is in fact the same exact mechanism used by the command-line tool `kubectl` when issuing
 a `rollout restart`.
 
+Optionally, and disabled by default (`--enable-argo-rollouts`), Fortsa can also detect and restart
+pods owned by an [Argo Rollouts](https://argoproj.github.io/rollouts/) `Rollout` resource, using
+Argo's own `spec.restartAt` field (the same mechanism as `kubectl argo rollouts restart`) instead
+of the annotation. This only reads/patches the `Rollout` resource if its CRD is already installed
+in the cluster — Fortsa does not introduce any CRDs of its own, and does not add a Go dependency on
+Argo Rollouts to do this (it uses unstructured objects via the Kubernetes API). See
+[ARCHITECTURE.md](ARCHITECTURE.md#argo-rollouts-support-optional) for details.
+
 Fortsa currently has no CRDs and there are no plans to introduce any.
 
 Fortsa is written in Go, and compiles to a single binary that is deployed via a bare container with

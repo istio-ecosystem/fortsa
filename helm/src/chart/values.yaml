@@ -25,6 +25,10 @@ fortsaOptions:
   annotationCooldown: "5m"
   ## Comma-separated list of namespaces to skip when scanning pods for outdated sidecars.
   skipNamespaces: "kube-system,istio-system"
+  ## If true, detect and restart Argo Rollouts `Rollout` resources with outdated sidecars.
+  ## Requires the Rollout CRD (argoproj.io/v1alpha1) to be installed; also grants RBAC for rollouts.argoproj.io.
+  argoRollouts:
+    enabled: false
 
 ## Configure the controller manager deployment
 ##
